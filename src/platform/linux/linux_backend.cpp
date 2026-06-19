@@ -1,5 +1,7 @@
 #include "linux_backend.h"
 
+#include "../../backend/bluetooth_error.h"
+
 #include <functional>
 
 namespace bluetooth {
@@ -22,6 +24,32 @@ godot::String device_class_from_cod(uint32_t p_class) {
 	return "unknown";
 }
 
+BluetoothErrorCode infer_error_code(const godot::String &p_message) {
+	const godot::String lower = p_message.to_lower();
+	if (lower.contains("not found") || lower.contains("device not found")) {
+		return BluetoothErrorCode::DEVICE_NOT_FOUND;
+	}
+	if (lower.contains("not a valid") || lower.contains("invalid address")) {
+		return BluetoothErrorCode::INVALID_ADDRESS;
+	}
+	if (lower.contains("access denied") || lower.contains("permission")) {
+		return BluetoothErrorCode::PERMISSION_DENIED;
+	}
+	if (lower.contains("timeout") || lower.contains("timed out")) {
+		return BluetoothErrorCode::OPERATION_TIMEOUT;
+	}
+	if (lower.contains("powered") || lower.contains("radio off")) {
+		return BluetoothErrorCode::RADIO_OFF;
+	}
+	if (lower.contains("not supported")) {
+		return BluetoothErrorCode::NOT_SUPPORTED;
+	}
+	if (lower.contains("rejected")) {
+		return BluetoothErrorCode::PAIRING_REJECTED;
+	}
+	return BluetoothErrorCode::UNKNOWN;
+}
+
 } // namespace
 
 LinuxBackend::~LinuxBackend() {
@@ -34,11 +62,13 @@ void LinuxBackend::emit(const BluetoothEvent &p_event) {
 	}
 }
 
-void LinuxBackend::emit_error(const godot::String &p_operation, const godot::String &p_message) {
+void LinuxBackend::emit_error(const godot::String &p_operation, const godot::String &p_message,
+		BluetoothErrorCode p_error_code) {
 	BluetoothEvent event;
 	event.type = EventType::ERROR_OCCURRED;
 	event.operation = p_operation;
 	event.message = p_message;
+	event.error_code = p_error_code == BluetoothErrorCode::UNKNOWN ? infer_error_code(p_message) : p_error_code;
 	emit(event);
 }
 
@@ -52,32 +82,21 @@ void LinuxBackend::emit_device_removed(const godot::String &p_address) {
 void LinuxBackend::emit_paired_devices_updated() {
 	BluetoothEvent event;
 	event.type = EventType::PAIRED_DEVICES_UPDATED;
-	{
-		std::lock_guard<std::mutex> lock(state_mutex);
-		for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-			event.devices.push_back(item.value.to_dictionary());
-		}
-	}
+	event.devices = cache.paired_array();
 	emit(event);
 }
 
-void LinuxBackend::remove_device_from_cache(const godot::String &p_key, const godot::String &p_address) {
-	std::lock_guard<std::mutex> lock(state_mutex);
-	discovered_devices.erase(p_key);
-	paired_devices.erase(p_key);
-	if (is_valid_bluetooth_address(p_address)) {
-		address_to_device_id.erase(normalize_address(p_address));
+bool LinuxBackend::device_passes_scan_filter(const DeviceInfo &p_info) const {
+	if (scan_options.named_only && p_info.name.is_empty()) {
+		return false;
 	}
-}
-
-godot::String LinuxBackend::device_cache_key(const DeviceInfo &p_info) const {
-	if (is_valid_bluetooth_address(p_info.address)) {
-		return normalize_address(p_info.address);
+	if (scan_options.gamepads_only && p_info.device_class != "gamepad") {
+		return false;
 	}
-	if (!p_info.device_id.is_empty()) {
-		return p_info.device_id;
+	if (scan_options.min_rssi > -127 && p_info.has_rssi && p_info.rssi < scan_options.min_rssi) {
+		return false;
 	}
-	return p_info.address;
+	return true;
 }
 
 DeviceInfo LinuxBackend::device_info_from_bluez(const BluezDeviceProperties &p_props) const {
@@ -99,6 +118,11 @@ DeviceInfo LinuxBackend::device_info_from_bluez(const BluezDeviceProperties &p_p
 		info.device_class = infer_device_class(info.name);
 	}
 
+	if (p_props.has_rssi) {
+		info.rssi = p_props.rssi;
+		info.has_rssi = true;
+	}
+
 	if (info.address.is_empty()) {
 		info.address = info.device_id;
 	}
@@ -107,93 +131,31 @@ DeviceInfo LinuxBackend::device_info_from_bluez(const BluezDeviceProperties &p_p
 }
 
 void LinuxBackend::upsert_device(const DeviceInfo &p_info, bool p_emit_event, bool p_force_emit) {
-	DeviceInfo info = p_info;
-	if (is_valid_bluetooth_address(info.address)) {
-		info.address = normalize_address(info.address);
-	}
-	const godot::String key = device_cache_key(info);
 	bool is_new = false;
-
-	{
-		std::lock_guard<std::mutex> lock(state_mutex);
-		is_new = !discovered_devices.has(key);
-
-		godot::PackedStringArray stale_keys;
-		for (godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-			if (item.key == key) {
-				continue;
-			}
-			if (!info.device_id.is_empty() && item.value.device_id == info.device_id) {
-				stale_keys.append(item.key);
-				continue;
-			}
-			if (is_valid_bluetooth_address(info.address) && addresses_match(item.value.address, info.address)) {
-				stale_keys.append(item.key);
-			}
-		}
-		for (int i = 0; i < stale_keys.size(); i++) {
-			discovered_devices.erase(stale_keys[i]);
-			paired_devices.erase(stale_keys[i]);
-		}
-
-		if (discovered_devices.has(key)) {
-			const DeviceInfo existing = discovered_devices[key];
-			if (info.name.is_empty()) {
-				info.name = existing.name;
-			}
-		}
-
-		discovered_devices[key] = info;
-		if (is_valid_bluetooth_address(info.address)) {
-			address_to_device_id[info.address] = info.device_id;
-		}
-		if (info.paired) {
-			paired_devices[key] = info;
-		} else {
-			paired_devices.erase(key);
-		}
-	}
+	cache.upsert(p_info, is_new);
 
 	if (p_emit_event && (is_new || p_force_emit)) {
-		BluetoothEvent event;
-		event.type = EventType::DEVICE_FOUND;
-		event.device = info;
-		emit(event);
-	}
-}
-
-bool LinuxBackend::lookup_cached_state(const godot::String &p_address, bool &p_out_value,
-		const std::function<bool(const DeviceInfo &)> &p_selector) {
-	const godot::String normalized = normalize_address(p_address);
-	std::lock_guard<std::mutex> lock(state_mutex);
-	if (discovered_devices.has(normalized)) {
-		p_out_value = p_selector(discovered_devices[normalized]);
-		return true;
-	}
-	for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-		if (addresses_match(item.value.address, normalized)) {
-			p_out_value = p_selector(item.value);
-			return true;
+		DeviceInfo emit_info = p_info;
+		DeviceInfo cached;
+		if (cache.get_device(cache.device_cache_key(p_info), cached)) {
+			emit_info = cached;
+		}
+		if (!scanning || device_passes_scan_filter(emit_info)) {
+			BluetoothEvent event;
+			event.type = EventType::DEVICE_FOUND;
+			event.device = emit_info;
+			emit(event);
 		}
 	}
-	return false;
 }
 
 godot::String LinuxBackend::resolve_device_path(const godot::String &p_address) {
-	const godot::String normalized = normalize_address(p_address);
-
-	{
-		std::lock_guard<std::mutex> lock(state_mutex);
-		if (address_to_device_id.has(normalized)) {
-			return address_to_device_id[normalized];
-		}
-		for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-			if (item.key == normalized || addresses_match(item.value.address, normalized)) {
-				return item.value.device_id;
-			}
-		}
+	const godot::String from_cache = cache.resolve_device_id(p_address);
+	if (!from_cache.is_empty()) {
+		return from_cache;
 	}
 
+	const godot::String normalized = normalize_address(p_address);
 	std::vector<BluezDeviceProperties> devices;
 	std::vector<BluezAdapterInfo> adapters;
 	if (!dbus.get_managed_objects(devices, adapters)) {
@@ -223,6 +185,47 @@ void LinuxBackend::enumerate_devices(bool p_emit_events, bool p_force_emit) {
 		const DeviceInfo info = device_info_from_bluez(props);
 		upsert_device(info, p_emit_events, p_force_emit);
 	}
+}
+
+void LinuxBackend::register_signal_matches() {
+	if (signal_matches_registered) {
+		return;
+	}
+
+	dbus.add_match("type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesAdded',path='/'",
+			"interfaces_added");
+	dbus.add_match("type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesRemoved',path='/'",
+			"interfaces_removed");
+	dbus.add_match(
+			"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.Device1'",
+			"device_properties_changed");
+	signal_matches_registered = true;
+}
+
+bool LinuxBackend::ensure_adapter_powered() {
+	std::vector<BluezDeviceProperties> devices;
+	std::vector<BluezAdapterInfo> adapters;
+	if (!dbus.get_managed_objects(devices, adapters)) {
+		return false;
+	}
+
+	for (const BluezAdapterInfo &adapter : adapters) {
+		if (adapter.object_path != adapter_path) {
+			continue;
+		}
+		adapter_powered = adapter.powered;
+		if (!adapter.powered) {
+			if (dbus.adapter_set_powered(adapter_path, true)) {
+				adapter_powered = true;
+			} else {
+				emit_error("initialize",
+						"initialize: adapter is not powered and adapter_set_powered failed: " + dbus.get_last_error(),
+						BluetoothErrorCode::RADIO_OFF);
+			}
+		}
+		return true;
+	}
+	return false;
 }
 
 void LinuxBackend::handle_interfaces_added(DBusMessage *p_message) {
@@ -301,6 +304,7 @@ void LinuxBackend::handle_properties_changed(DBusMessage *p_message) {
 	props.valid = true;
 	bool connected_changed = false;
 	bool paired_changed = false;
+	bool rssi_changed = false;
 
 	DBusMessageIter changed_iter;
 	dbus_message_iter_recurse(&args_iter, &changed_iter);
@@ -336,44 +340,44 @@ void LinuxBackend::handle_properties_changed(DBusMessage *p_message) {
 			BluezDBus::read_variant_bool(&entry_iter, props.trusted);
 		} else if (property_name == "Class") {
 			BluezDBus::read_variant_uint32(&entry_iter, props.device_class);
+		} else if (property_name == "RSSI") {
+			int16_t rssi_value = 0;
+			if (BluezDBus::read_variant_int16(&entry_iter, rssi_value)) {
+				props.rssi = rssi_value;
+				props.has_rssi = true;
+				rssi_changed = true;
+			}
 		}
 
 		dbus_message_iter_next(&changed_iter);
 	}
 
 	{
-		std::lock_guard<std::mutex> lock(state_mutex);
-		for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-			if (item.value.device_id == device_path) {
-				if (props.address.is_empty()) {
-					props.address = item.value.address;
-				}
-				if (props.name.is_empty()) {
-					props.name = item.value.name;
-				}
-				if (!paired_changed) {
-					props.paired = item.value.paired;
-				}
-				if (!connected_changed) {
-					props.connected = item.value.connected;
-				}
-				props.trusted = item.value.trusted || props.trusted;
-				break;
+		godot::String existing_key;
+		DeviceInfo existing_info;
+		if (cache.find_by_device_id(device_path, existing_key, existing_info)) {
+			if (props.address.is_empty()) {
+				props.address = existing_info.address;
 			}
+			if (props.name.is_empty()) {
+				props.name = existing_info.name;
+			}
+			if (!paired_changed) {
+				props.paired = existing_info.paired;
+			}
+			if (!connected_changed) {
+				props.connected = existing_info.connected;
+			}
+			if (!rssi_changed && existing_info.has_rssi) {
+				props.rssi = existing_info.rssi;
+				props.has_rssi = true;
+			}
+			props.trusted = existing_info.trusted || props.trusted;
 		}
 	}
 
 	const DeviceInfo info = device_info_from_bluez(props);
-	upsert_device(info, true, paired_changed || connected_changed);
-
-	if (paired_changed && info.paired && is_valid_bluetooth_address(info.address)) {
-		BluetoothEvent paired;
-		paired.type = EventType::PAIRING_SUCCEEDED;
-		paired.address = normalize_address(info.address);
-		emit(paired);
-	}
-	// Paired=false updates via upsert_device above (force-emits DEVICE_FOUND).
-	// Removal is handled by unpair_device, InterfacesRemoved, or explicit DEVICE_REMOVED.
+	upsert_device(info, true, paired_changed || connected_changed || rssi_changed);
 
 	if (connected_changed && is_valid_bluetooth_address(info.address)) {
 		BluetoothEvent event;
@@ -421,19 +425,10 @@ void LinuxBackend::handle_interfaces_removed(DBusMessage *p_message) {
 
 	godot::String removal_address;
 	godot::String removal_key;
-	{
-		std::lock_guard<std::mutex> lock(state_mutex);
-		for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-			if (item.value.device_id == path) {
-				removal_key = item.key;
-				removal_address = item.value.address;
-				break;
-			}
-		}
-	}
-
-	if (!removal_key.is_empty()) {
-		remove_device_from_cache(removal_key, removal_address);
+	DeviceInfo removal_info;
+	if (cache.find_by_device_id(path, removal_key, removal_info)) {
+		removal_address = removal_info.address;
+		cache.remove(removal_key, removal_address);
 		emit_device_removed(removal_address);
 	}
 }
@@ -474,12 +469,32 @@ bool LinuxBackend::initialize() {
 		handle_dbus_signal(p_message);
 	});
 
+	agent.set_pairing_state(&pairing_pending);
+	agent.set_pairing_request_handler([this](const godot::String &p_address, const godot::String &p_kind,
+												 const godot::String &p_pin) {
+		BluetoothEvent event;
+		event.address = p_address;
+		event.pairing_kind = p_kind;
+		event.display_pin = p_pin;
+		if (p_kind == "confirm") {
+			event.type = EventType::PAIRING_CONFIRMATION_REQUESTED;
+		} else if (p_kind == "provide_pin") {
+			event.type = EventType::PAIRING_PIN_REQUESTED;
+		} else if (p_kind == "display_pin") {
+			event.type = EventType::PAIRING_DISPLAY_PIN;
+		} else {
+			return;
+		}
+		emit(event);
+	});
+
 	godot::String agent_error;
 	if (!agent.register_agent(dbus, &agent_error)) {
 		emit_error("initialize",
 				"initialize failed: could not register BlueZ pairing agent at " + godot::String(BluezAgent::AGENT_PATH) +
 						". " + agent_error +
-						" Ensure bluetoothd is running and your user has BlueZ D-Bus permissions (bluetooth group).");
+						" Ensure bluetoothd is running and your user has BlueZ D-Bus permissions (bluetooth group).",
+				BluetoothErrorCode::PERMISSION_DENIED);
 		dbus.disconnect();
 		return false;
 	}
@@ -491,6 +506,9 @@ bool LinuxBackend::initialize() {
 		return false;
 	}
 
+	ensure_adapter_powered();
+	register_signal_matches();
+
 	initialized = true;
 	refresh_paired_devices();
 	return true;
@@ -499,6 +517,10 @@ bool LinuxBackend::initialize() {
 void LinuxBackend::shutdown() {
 	stop_scan();
 	if (initialized) {
+		if (signal_matches_registered) {
+			dbus.clear_matches();
+			signal_matches_registered = false;
+		}
 		agent.unregister_agent(dbus);
 		dbus.disconnect();
 		initialized = false;
@@ -510,14 +532,27 @@ void LinuxBackend::poll() {
 		return;
 	}
 	dbus.poll(0);
+
+	if (scanning && scan_deadline.has_value()) {
+		if (std::chrono::steady_clock::now() >= *scan_deadline) {
+			stop_scan();
+		}
+	}
 }
 
-void LinuxBackend::start_scan() {
+void LinuxBackend::start_scan(const ScanOptions &p_options) {
 	if (!initialized && !initialize()) {
 		return;
 	}
 	if (scanning) {
 		return;
+	}
+
+	scan_options = p_options;
+	if (p_options.timeout_seconds > 0) {
+		scan_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(p_options.timeout_seconds);
+	} else {
+		scan_deadline.reset();
 	}
 
 	BluetoothEvent started;
@@ -527,18 +562,13 @@ void LinuxBackend::start_scan() {
 	enumerate_devices(false, false);
 	emit_paired_devices_updated();
 
-	dbus.add_match("type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesAdded',path='/'",
-			"interfaces_added");
-	dbus.add_match("type='signal',interface='org.freedesktop.DBus.ObjectManager',member='InterfacesRemoved',path='/'",
-			"interfaces_removed");
-	dbus.add_match(
-			"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.Device1'",
-			"device_properties_changed");
+	if (!dbus.adapter_set_discovery_filter(adapter_path, p_options.min_rssi)) {
+		emit_error("start_scan", "start_scan failed to set discovery filter: " + dbus.get_last_error());
+		return;
+	}
 
 	if (!dbus.adapter_start_discovery(adapter_path)) {
-		dbus.remove_match("interfaces_added");
-		dbus.remove_match("interfaces_removed");
-		dbus.remove_match("device_properties_changed");
+		dbus.adapter_clear_discovery_filter(adapter_path);
 		emit_error("start_scan", "start_scan failed: " + dbus.get_last_error());
 		return;
 	}
@@ -552,14 +582,68 @@ void LinuxBackend::stop_scan() {
 	}
 
 	dbus.adapter_stop_discovery(adapter_path);
-	dbus.remove_match("interfaces_added");
-	dbus.remove_match("interfaces_removed");
-	dbus.remove_match("device_properties_changed");
+	dbus.adapter_clear_discovery_filter(adapter_path);
 	scanning = false;
+	scan_deadline.reset();
 
 	BluetoothEvent event;
 	event.type = EventType::SCAN_STOPPED;
 	emit(event);
+}
+
+void LinuxBackend::pair_device_at_path(const godot::String &p_device_path, const godot::String &p_event_address) {
+	const godot::String event_address = is_valid_bluetooth_address(p_event_address)
+			? normalize_address(p_event_address)
+			: p_event_address;
+
+	BluetoothEvent started;
+	started.type = EventType::PAIRING_STARTED;
+	started.address = event_address;
+	emit(started);
+
+	if (p_device_path.is_empty()) {
+		BluetoothEvent failed;
+		failed.type = EventType::PAIRING_FAILED;
+		failed.address = event_address;
+		failed.message = "pair_device failed: device not found in BlueZ cache. Start a scan and ensure the device is in pairing mode.";
+		failed.error_code = BluetoothErrorCode::DEVICE_NOT_FOUND;
+		emit(failed);
+		return;
+	}
+
+	bool already_paired = false;
+	if (!event_address.is_empty() &&
+			cache.lookup_cached_state(event_address, already_paired, [](const DeviceInfo &p_info) { return p_info.paired; }) &&
+			already_paired) {
+		BluetoothEvent succeeded;
+		succeeded.type = EventType::PAIRING_SUCCEEDED;
+		succeeded.address = event_address;
+		emit(succeeded);
+		refresh_paired_devices();
+		return;
+	}
+
+	if (dbus.device_pair(p_device_path)) {
+		dbus.device_set_trusted(p_device_path, true);
+		BluezDeviceProperties props;
+		if (dbus.get_device_properties(p_device_path, props)) {
+			const DeviceInfo info = device_info_from_bluez(props);
+			upsert_device(info, true, true);
+		}
+		BluetoothEvent succeeded;
+		succeeded.type = EventType::PAIRING_SUCCEEDED;
+		succeeded.address = event_address;
+		emit(succeeded);
+		refresh_paired_devices();
+	} else {
+		BluetoothEvent failed;
+		failed.type = EventType::PAIRING_FAILED;
+		failed.address = event_address;
+		failed.message = "pair_device failed for address \"" + event_address + "\" (device_path=\"" + p_device_path +
+				"\"): " + dbus.get_last_error();
+		failed.error_code = infer_error_code(failed.message);
+		emit(failed);
+	}
 }
 
 void LinuxBackend::pair_device(const godot::String &p_address) {
@@ -576,6 +660,7 @@ void LinuxBackend::pair_device(const godot::String &p_address) {
 		failed.address = normalized;
 		failed.message = "pair_device failed for address \"" + normalized +
 				"\": not a valid 6-byte Bluetooth MAC address (expected format AA:BB:CC:DD:EE:FF).";
+		failed.error_code = BluetoothErrorCode::INVALID_ADDRESS;
 		emit(failed);
 		return;
 	}
@@ -587,12 +672,13 @@ void LinuxBackend::pair_device(const godot::String &p_address) {
 		failed.address = normalized;
 		failed.message = "pair_device failed for address \"" + normalized +
 				"\": device not found in BlueZ cache. Start a scan and ensure the device is in pairing mode.";
+		failed.error_code = BluetoothErrorCode::DEVICE_NOT_FOUND;
 		emit(failed);
 		return;
 	}
 
 	bool already_paired = false;
-	if (lookup_cached_state(normalized, already_paired, [](const DeviceInfo &p_info) { return p_info.paired; }) &&
+	if (cache.lookup_cached_state(normalized, already_paired, [](const DeviceInfo &p_info) { return p_info.paired; }) &&
 			already_paired) {
 		BluetoothEvent succeeded;
 		succeeded.type = EventType::PAIRING_SUCCEEDED;
@@ -603,6 +689,7 @@ void LinuxBackend::pair_device(const godot::String &p_address) {
 	}
 
 	if (dbus.device_pair(device_path)) {
+		dbus.device_set_trusted(device_path, true);
 		BluezDeviceProperties props;
 		if (dbus.get_device_properties(device_path, props)) {
 			const DeviceInfo info = device_info_from_bluez(props);
@@ -619,8 +706,20 @@ void LinuxBackend::pair_device(const godot::String &p_address) {
 		failed.address = normalized;
 		failed.message = "pair_device failed for address \"" + normalized + "\" (device_path=\"" + device_path +
 				"\"): " + dbus.get_last_error();
+		failed.error_code = infer_error_code(failed.message);
 		emit(failed);
 	}
+}
+
+void LinuxBackend::pair_device_by_id(const godot::String &p_device_id) {
+	godot::String event_address = p_device_id;
+	godot::String key;
+	DeviceInfo cached;
+	if (cache.find_by_device_id(p_device_id, key, cached) && !cached.address.is_empty()) {
+		event_address = cached.address;
+	}
+
+	pair_device_at_path(p_device_id, event_address);
 }
 
 void LinuxBackend::unpair_device(const godot::String &p_address) {
@@ -629,7 +728,8 @@ void LinuxBackend::unpair_device(const godot::String &p_address) {
 	if (device_path.is_empty()) {
 		emit_error("unpair_device",
 				"unpair_device failed for address \"" + normalized +
-						"\": device not found in BlueZ cache or managed objects.");
+						"\": device not found in BlueZ cache or managed objects.",
+				BluetoothErrorCode::DEVICE_NOT_FOUND);
 		return;
 	}
 
@@ -656,16 +756,12 @@ void LinuxBackend::unpair_device(const godot::String &p_address) {
 
 	if (dbus.adapter_remove_device(adapter_path, device_path)) {
 		godot::String removal_key = normalized;
-		{
-			std::lock_guard<std::mutex> lock(state_mutex);
-			for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-				if (item.value.device_id == device_path || addresses_match(item.value.address, normalized)) {
-					removal_key = item.key;
-					break;
-				}
-			}
+		godot::String removal_address = normalized;
+		DeviceInfo removal_info;
+		if (cache.find_by_device_id(device_path, removal_key, removal_info)) {
+			removal_address = removal_info.address;
 		}
-		remove_device_from_cache(removal_key, normalized);
+		cache.remove(removal_key, removal_address);
 		emit_device_removed(normalized);
 	} else {
 		emit_error("unpair_device",
@@ -679,7 +775,8 @@ void LinuxBackend::connect_device(const godot::String &p_address) {
 	if (!is_valid_bluetooth_address(normalized)) {
 		emit_error("connect_device",
 				"connect_device failed for input \"" + normalized +
-						"\": not a valid 6-byte Bluetooth MAC address (expected format AA:BB:CC:DD:EE:FF).");
+						"\": not a valid 6-byte Bluetooth MAC address (expected format AA:BB:CC:DD:EE:FF).",
+				BluetoothErrorCode::INVALID_ADDRESS);
 		return;
 	}
 
@@ -687,7 +784,8 @@ void LinuxBackend::connect_device(const godot::String &p_address) {
 	if (device_path.is_empty()) {
 		emit_error("connect_device",
 				"connect_device failed for address \"" + normalized +
-						"\": device not found. Pair the device first or run a scan while it is powered on.");
+						"\": device not found. Pair the device first or run a scan while it is powered on.",
+				BluetoothErrorCode::DEVICE_NOT_FOUND);
 		return;
 	}
 
@@ -715,7 +813,8 @@ void LinuxBackend::disconnect_device(const godot::String &p_address) {
 	const godot::String device_path = resolve_device_path(normalized);
 	if (device_path.is_empty()) {
 		emit_error("disconnect_device",
-				"disconnect_device failed for address \"" + normalized + "\": device not found in BlueZ cache.");
+				"disconnect_device failed for address \"" + normalized + "\": device not found in BlueZ cache.",
+				BluetoothErrorCode::DEVICE_NOT_FOUND);
 		return;
 	}
 
@@ -758,9 +857,31 @@ void LinuxBackend::refresh_paired_devices() {
 	emit_paired_devices_updated();
 }
 
+void LinuxBackend::confirm_pairing(const godot::String &p_pin) {
+	PairingUserResponse response;
+	response.accepted = true;
+	response.pin = p_pin;
+	pairing_pending.submit(response);
+}
+
+void LinuxBackend::reject_pairing() {
+	PairingUserResponse response;
+	response.accepted = false;
+	pairing_pending.submit(response);
+}
+
+void LinuxBackend::cancel_pairing() {
+	reject_pairing();
+	pairing_pending.reset();
+}
+
+void LinuxBackend::submit_pairing_response(const PairingUserResponse &p_response) {
+	pairing_pending.submit(p_response);
+}
+
 bool LinuxBackend::is_connected(const godot::String &p_address) {
 	bool connected = false;
-	if (lookup_cached_state(p_address, connected, [](const DeviceInfo &p_info) { return p_info.connected; })) {
+	if (cache.lookup_cached_state(p_address, connected, [](const DeviceInfo &p_info) { return p_info.connected; })) {
 		return connected;
 	}
 
@@ -780,7 +901,7 @@ bool LinuxBackend::is_connected(const godot::String &p_address) {
 
 bool LinuxBackend::is_paired(const godot::String &p_address) {
 	bool paired = false;
-	if (lookup_cached_state(p_address, paired, [](const DeviceInfo &p_info) { return p_info.paired; })) {
+	if (cache.lookup_cached_state(p_address, paired, [](const DeviceInfo &p_info) { return p_info.paired; })) {
 		return paired;
 	}
 
@@ -796,6 +917,25 @@ bool LinuxBackend::is_paired(const godot::String &p_address) {
 		return info.paired;
 	}
 	return false;
+}
+
+bool LinuxBackend::is_radio_on() const {
+	return adapter_powered;
+}
+
+godot::Dictionary LinuxBackend::get_capabilities() const {
+	godot::Dictionary caps;
+	caps["platform"] = "linux";
+	caps["pair_by_address"] = true;
+	caps["pair_by_device_id"] = true;
+	caps["interactive_pairing"] = true;
+	caps["scan_named_only_filter"] = true;
+	caps["scan_gamepads_only_filter"] = true;
+	caps["scan_min_rssi_filter"] = true;
+	caps["scan_timeout"] = true;
+	caps["can_unpair_while_connected"] = true;
+	caps["radio_control"] = true;
+	return caps;
 }
 
 } // namespace bluetooth

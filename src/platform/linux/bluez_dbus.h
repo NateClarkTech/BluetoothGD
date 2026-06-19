@@ -19,6 +19,8 @@ struct BluezDeviceProperties {
 	bool connected = false;
 	bool trusted = false;
 	uint32_t device_class = 0;
+	int16_t rssi = 0;
+	bool has_rssi = false;
 	bool valid = false;
 };
 
@@ -57,8 +59,15 @@ public:
 	bool device_pair(const godot::String &p_device_path, int p_timeout_ms = 60000);
 	bool device_connect(const godot::String &p_device_path, int p_timeout_ms = 30000);
 	bool device_disconnect(const godot::String &p_device_path, int p_timeout_ms = 30000);
+	bool device_set_trusted(const godot::String &p_device_path, bool p_trusted = true);
+
+	bool adapter_set_powered(const godot::String &p_adapter_path, bool p_powered = true);
+	bool adapter_set_discovery_filter(const godot::String &p_adapter_path, int p_min_rssi = -127,
+			const godot::String &p_transport = "auto");
+	bool adapter_clear_discovery_filter(const godot::String &p_adapter_path);
 
 	bool get_device_properties(const godot::String &p_device_path, BluezDeviceProperties &p_out_props);
+	bool get_all_device_properties(const godot::String &p_device_path, BluezDeviceProperties &p_out_props);
 
 	static bool parse_interface_properties(const godot::String &p_path,
 			const godot::String &p_interface,
@@ -69,6 +78,7 @@ public:
 	static bool read_variant_string(DBusMessageIter *p_iter, godot::String &p_out);
 	static bool read_variant_bool(DBusMessageIter *p_iter, bool &p_out);
 	static bool read_variant_uint32(DBusMessageIter *p_iter, uint32_t &p_out);
+	static bool read_variant_int16(DBusMessageIter *p_iter, int16_t &p_out);
 
 	godot::String get_last_error() const { return last_error; }
 	void set_last_error(const godot::String &p_error) { last_error = p_error; }
@@ -98,6 +108,11 @@ private:
 			const godot::String &p_interface,
 			const godot::String &p_property,
 			const std::function<bool(DBusMessageIter *)> &p_reader);
+
+	bool set_property_bool(const godot::String &p_path,
+			const godot::String &p_interface,
+			const godot::String &p_property,
+			bool p_value);
 };
 
 } // namespace bluetooth

@@ -32,10 +32,48 @@ godot::String dbus_error_message(DBusError *p_error, DBusMessage *p_reply) {
 	return "Unknown D-Bus error.";
 }
 
+godot::String read_device_path(DBusMessage *p_message) {
+	DBusMessageIter args_iter;
+	if (!dbus_message_iter_init(p_message, &args_iter)) {
+		return "";
+	}
+	if (dbus_message_iter_get_arg_type(&args_iter) != DBUS_TYPE_OBJECT_PATH) {
+		return "";
+	}
+	const char *object_path = nullptr;
+	dbus_message_iter_get_basic(&args_iter, &object_path);
+	return object_path ? godot::String(object_path) : godot::String();
+}
+
+godot::String read_pin(DBusMessage *p_message) {
+	DBusMessageIter args_iter;
+	if (!dbus_message_iter_init(p_message, &args_iter)) {
+		return "";
+	}
+	if (dbus_message_iter_get_arg_type(&args_iter) != DBUS_TYPE_OBJECT_PATH) {
+		return "";
+	}
+	if (!dbus_message_iter_next(&args_iter) || dbus_message_iter_get_arg_type(&args_iter) != DBUS_TYPE_UINT32) {
+		return "";
+	}
+	if (!dbus_message_iter_next(&args_iter) || dbus_message_iter_get_arg_type(&args_iter) != DBUS_TYPE_STRING) {
+		return "";
+	}
+	const char *pin = nullptr;
+	dbus_message_iter_get_basic(&args_iter, &pin);
+	return pin ? godot::String(pin) : godot::String();
+}
+
 } // namespace
+
+BluezAgent *BluezAgent::active_instance = nullptr;
 
 DBusMessage *BluezAgent::create_empty_reply(DBusMessage *p_message) {
 	return dbus_message_new_method_return(p_message);
+}
+
+DBusMessage *BluezAgent::create_rejected_reply(DBusMessage *p_message, const char *p_message_text) {
+	return dbus_message_new_error(p_message, "org.bluez.Error.Rejected", p_message_text);
 }
 
 DBusHandlerResult BluezAgent::agent_message_handler(DBusConnection *p_connection,
@@ -52,13 +90,66 @@ DBusHandlerResult BluezAgent::agent_message_handler(DBusConnection *p_connection
 	}
 
 	const char *member = dbus_message_get_member(p_message);
-	if (!member) {
+	if (!member || !active_instance) {
 		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 	}
 
+	BluezAgent *self = active_instance;
+	PairingPendingState *pairing = self->pairing_state;
 	DBusMessage *reply = nullptr;
+
 	if (strcmp(member, "RequestPinCode") == 0 || strcmp(member, "RequestPasskey") == 0) {
-		reply = dbus_message_new_error(p_message, "org.bluez.Error.Rejected", "PIN/passkey entry not supported.");
+		const godot::String device_path = read_device_path(p_message);
+		if (pairing) {
+			pairing->begin(device_path, "provide_pin");
+			if (self->pairing_request_handler) {
+				self->pairing_request_handler(device_path, "provide_pin", "");
+			}
+			PairingUserResponse response;
+			if (pairing->wait_for_response(60000, response) && response.accepted && !response.pin.is_empty()) {
+				const godot::CharString pin_utf8 = response.pin.utf8();
+				const char *pin_ptr = pin_utf8.get_data();
+				reply = create_empty_reply(p_message);
+				DBusMessageIter iter;
+				dbus_message_iter_init_append(reply, &iter);
+				dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &pin_ptr);
+			} else {
+				reply = create_rejected_reply(p_message, "PIN entry rejected or timed out.");
+			}
+			pairing->reset();
+		} else {
+			reply = create_rejected_reply(p_message, "PIN/passkey entry not supported.");
+		}
+	} else if (strcmp(member, "RequestConfirmation") == 0 || strcmp(member, "RequestAuthorization") == 0) {
+		const godot::String device_path = read_device_path(p_message);
+		if (pairing) {
+			pairing->begin(device_path, "confirm");
+			if (self->pairing_request_handler) {
+				self->pairing_request_handler(device_path, "confirm", "");
+			}
+			PairingUserResponse response;
+			if (pairing->wait_for_response(60000, response) && response.accepted) {
+				reply = create_empty_reply(p_message);
+			} else {
+				reply = create_rejected_reply(p_message, "Pairing confirmation rejected or timed out.");
+			}
+			pairing->reset();
+		} else {
+			reply = create_empty_reply(p_message);
+		}
+	} else if (strcmp(member, "DisplayPinCode") == 0 || strcmp(member, "DisplayPasskey") == 0) {
+		const godot::String pin = read_pin(p_message);
+		if (pairing) {
+			const godot::String device_path = read_device_path(p_message);
+			pairing->begin(device_path, "display_pin", pin);
+			if (self->pairing_request_handler) {
+				self->pairing_request_handler(device_path, "display_pin", pin);
+			}
+			PairingUserResponse response;
+			pairing->wait_for_response(60000, response);
+			pairing->reset();
+		}
+		reply = create_empty_reply(p_message);
 	} else {
 		reply = create_empty_reply(p_message);
 	}
@@ -78,6 +169,8 @@ bool BluezAgent::register_agent(BluezDBus &p_dbus, godot::String *p_error) {
 		}
 		return false;
 	}
+
+	active_instance = this;
 
 	static DBusObjectPathVTable vtable = {};
 	vtable.message_function = agent_message_handler;
@@ -198,6 +291,7 @@ bool BluezAgent::register_agent(BluezDBus &p_dbus, godot::String *p_error) {
 void BluezAgent::unregister_agent(BluezDBus &p_dbus) {
 	DBusConnection *connection = p_dbus.get_connection();
 	if (!connection || !object_registered) {
+		active_instance = nullptr;
 		return;
 	}
 
@@ -222,6 +316,7 @@ void BluezAgent::unregister_agent(BluezDBus &p_dbus) {
 
 	dbus_connection_unregister_object_path(connection, AGENT_PATH);
 	object_registered = false;
+	active_instance = nullptr;
 }
 
 } // namespace bluetooth

@@ -40,6 +40,12 @@ void WorkerThread::enqueue_command(const BluetoothCommand &p_command) {
 	command_queue.push(p_command);
 }
 
+void WorkerThread::submit_pairing_response(const PairingUserResponse &p_response) {
+	if (backend) {
+		backend->submit_pairing_response(p_response);
+	}
+}
+
 ThreadSafeQueue<BluetoothEvent> &WorkerThread::get_event_queue() {
 	return event_queue;
 }
@@ -91,13 +97,16 @@ void WorkerThread::process_command(const BluetoothCommand &p_command) {
 			running.store(false);
 			break;
 		case CommandType::START_SCAN:
-			backend->start_scan();
+			backend->start_scan(p_command.scan_options);
 			break;
 		case CommandType::STOP_SCAN:
 			backend->stop_scan();
 			break;
 		case CommandType::PAIR_DEVICE:
 			backend->pair_device(p_command.address);
+			break;
+		case CommandType::PAIR_DEVICE_BY_ID:
+			backend->pair_device_by_id(p_command.address);
 			break;
 		case CommandType::UNPAIR_DEVICE:
 			backend->unpair_device(p_command.address);
@@ -110,6 +119,15 @@ void WorkerThread::process_command(const BluetoothCommand &p_command) {
 			break;
 		case CommandType::REFRESH_PAIRED_DEVICES:
 			backend->refresh_paired_devices();
+			break;
+		case CommandType::CONFIRM_PAIRING:
+			backend->confirm_pairing(p_command.pin);
+			break;
+		case CommandType::REJECT_PAIRING:
+			backend->reject_pairing();
+			break;
+		case CommandType::CANCEL_PAIRING:
+			backend->cancel_pairing();
 			break;
 	}
 }

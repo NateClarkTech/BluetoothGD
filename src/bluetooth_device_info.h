@@ -14,6 +14,8 @@ struct DeviceInfo {
 	bool trusted = false;
 	godot::String device_class;
 	godot::String device_id;
+	int rssi = 0;
+	bool has_rssi = false;
 
 	godot::Dictionary to_dictionary() const {
 		godot::Dictionary dict;
@@ -24,6 +26,9 @@ struct DeviceInfo {
 		dict[godot::String("trusted")] = trusted;
 		dict[godot::String("device_class")] = device_class;
 		dict[godot::String("device_id")] = device_id;
+		if (has_rssi) {
+			dict[godot::String("rssi")] = rssi;
+		}
 		return dict;
 	}
 
@@ -49,6 +54,10 @@ struct DeviceInfo {
 		}
 		if (p_dict.has("device_id")) {
 			info.device_id = p_dict["device_id"];
+		}
+		if (p_dict.has("rssi")) {
+			info.rssi = p_dict["rssi"];
+			info.has_rssi = true;
 		}
 		return info;
 	}

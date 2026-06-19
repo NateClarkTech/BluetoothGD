@@ -15,11 +15,12 @@ class BluetoothManager : public Node {
 	GDCLASS(BluetoothManager, Node)
 
 public:
-	void start_scan();
+	void start_scan(const Dictionary &p_options = Dictionary());
 	void stop_scan();
 	Array get_discovered_devices() const;
 
 	void pair_device(const String &p_address);
+	void pair_device_by_id(const String &p_device_id);
 	void unpair_device(const String &p_address);
 	void refresh_paired_devices();
 	Array get_paired_devices() const;
@@ -29,11 +30,18 @@ public:
 	void disconnect_device(const String &p_address);
 	bool is_connected(const String &p_address) const;
 
+	void confirm_pairing(const String &p_pin = "");
+	void reject_pairing();
+	void cancel_pairing();
+
 	String normalize_address(const String &p_address) const;
 	bool is_valid_bluetooth_address(const String &p_address) const;
 	bool can_unpair_while_connected() const;
 	bool is_bluetooth_available() const;
+	bool is_radio_on() const;
 	String get_platform_name() const;
+	Dictionary get_capabilities() const;
+	String get_error_code_name(int p_error_code) const;
 
 	void _ready() override;
 	void _process(double p_delta) override;
@@ -43,7 +51,10 @@ protected:
 	static void _bind_methods();
 
 private:
-	void enqueue_command(bluetooth::CommandType p_type, const String &p_address = String());
+	void enqueue_command(bluetooth::CommandType p_type, const String &p_address = String(),
+			const String &p_pin = String(), bool p_accepted = false,
+			const bluetooth::ScanOptions &p_scan_options = {});
+	bluetooth::ScanOptions scan_options_from_dictionary(const Dictionary &p_options) const;
 	void handle_event(const bluetooth::BluetoothEvent &p_event);
 	void upsert_device(const bluetooth::DeviceInfo &p_device);
 	void remove_device_for_address(const String &p_address);
@@ -57,7 +68,9 @@ private:
 
 	bluetooth::WorkerThread worker;
 	bool backend_available = false;
+	bool radio_on = true;
 	bool bluetooth_ready_emitted = false;
+	Dictionary cached_capabilities;
 	HashMap<String, bluetooth::DeviceInfo> discovered_devices;
 	HashMap<String, bluetooth::DeviceInfo> paired_devices;
 };

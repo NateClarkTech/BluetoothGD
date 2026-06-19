@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../bluetooth_device_info.h"
+#include "bluetooth_error.h"
 
 #include <godot_cpp/variant/string.hpp>
 
@@ -14,6 +15,9 @@ enum class EventType {
 	PAIRING_STARTED,
 	PAIRING_SUCCEEDED,
 	PAIRING_FAILED,
+	PAIRING_CONFIRMATION_REQUESTED,
+	PAIRING_PIN_REQUESTED,
+	PAIRING_DISPLAY_PIN,
 	CONNECTION_CHANGED,
 	ERROR_OCCURRED,
 	PAIRED_DEVICES_UPDATED,
@@ -26,6 +30,9 @@ struct BluetoothEvent {
 	godot::String address;
 	godot::String operation;
 	godot::String message;
+	godot::String pairing_kind;
+	godot::String display_pin;
+	BluetoothErrorCode error_code = BluetoothErrorCode::UNKNOWN;
 	bool connected = false;
 };
 

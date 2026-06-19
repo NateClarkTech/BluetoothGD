@@ -1,11 +1,15 @@
 #pragma once
 
 #include "../../backend/bluetooth_backend.h"
+#include "../../backend/device_cache.h"
+#include "../../backend/pairing_pending.h"
+#include "../../backend/scan_options.h"
 
-#include <godot_cpp/templates/hash_map.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
 #include <winrt/Windows.Devices.Enumeration.h>
 #include <winrt/base.h>
 
+#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -18,6 +22,15 @@ struct ActiveDeviceWatcher {
 	winrt::event_token removed_token{};
 };
 
+struct HidGamepadCache {
+	mutable std::mutex mutex;
+	std::chrono::steady_clock::time_point cached_at{};
+	godot::HashMap<godot::String, bool> results;
+	static constexpr int TTL_MS = 2000;
+
+	bool is_connected(const godot::String &p_normalized);
+};
+
 class WindowsBackend : public BluetoothBackend {
 public:
 	~WindowsBackend() override;
@@ -25,30 +38,39 @@ public:
 	bool initialize() override;
 	void shutdown() override;
 
-	void start_scan() override;
+	void start_scan(const ScanOptions &p_options = {}) override;
 	void stop_scan() override;
 
 	void pair_device(const godot::String &p_address) override;
+	void pair_device_by_id(const godot::String &p_device_id) override;
 	void unpair_device(const godot::String &p_address) override;
 	void connect_device(const godot::String &p_address) override;
 	void disconnect_device(const godot::String &p_address) override;
 
 	void refresh_paired_devices() override;
+	void confirm_pairing(const godot::String &p_pin = "") override;
+	void reject_pairing() override;
+	void cancel_pairing() override;
+	void submit_pairing_response(const PairingUserResponse &p_response) override;
 
 	bool is_connected(const godot::String &p_address) override;
 	bool is_paired(const godot::String &p_address) override;
+	bool is_radio_on() const override;
+	godot::Dictionary get_capabilities() const override;
 
 private:
 	void emit(const BluetoothEvent &p_event);
 	void emit_error(const godot::String &p_operation, const godot::String &p_message);
 	void emit_device_removed(const godot::String &p_address);
 	void emit_paired_devices_updated();
-	void remove_device_from_cache(const godot::String &p_key, const godot::String &p_address);
 	bool ensure_winrt_ready();
+	bool passes_scan_filters(const DeviceInfo &p_info) const;
 
 	void handle_device_added(const winrt::Windows::Devices::Enumeration::DeviceInformation &p_info);
 	void handle_device_updated(const winrt::Windows::Devices::Enumeration::DeviceInformationUpdate &p_update);
 	void handle_device_removed(const winrt::Windows::Devices::Enumeration::DeviceInformationUpdate &p_update);
+	void handle_pairing_requested(const winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs &p_args,
+			const godot::String &p_address);
 
 	void enumerate_snapshot(const winrt::hstring &p_selector, bool p_emit_events = true, bool p_force_emit = true);
 	void enumerate_hid_gamepads(bool p_emit_events = true, bool p_force_emit = true);
@@ -57,18 +79,19 @@ private:
 					winrt::Windows::Devices::Enumeration::DeviceInformationKind::Unknown);
 	void stop_all_watchers();
 	void upsert_device(const DeviceInfo &p_info, bool p_emit_event, bool p_force_emit = false);
-	godot::String device_cache_key(const DeviceInfo &p_info) const;
 
 	winrt::Windows::Devices::Enumeration::DeviceInformation find_device_information(const godot::String &p_address);
 	winrt::Windows::Devices::Enumeration::DeviceInformation find_device_information_by_id(const godot::String &p_device_id);
+	void perform_pairing(const winrt::Windows::Devices::Enumeration::DeviceInformation &p_device_info,
+			const godot::String &p_address);
 	void update_connection_state(const godot::String &p_address, bool p_report_errors = false, bool p_emit_event = true);
 
 	bool initialized = false;
 	bool scanning = false;
-	std::mutex state_mutex;
-	godot::HashMap<godot::String, DeviceInfo> discovered_devices;
-	godot::HashMap<godot::String, DeviceInfo> paired_devices;
-	godot::HashMap<godot::String, godot::String> address_to_device_id;
+	ScanOptions scan_options;
+	DeviceCache cache;
+	PairingPendingState pairing_pending;
+	HidGamepadCache hid_gamepad_cache;
 
 	std::vector<ActiveDeviceWatcher> active_watchers;
 };

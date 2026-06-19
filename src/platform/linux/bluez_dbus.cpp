@@ -206,6 +206,21 @@ bool BluezDBus::read_variant_bool(DBusMessageIter *p_iter, bool &p_out) {
 	return true;
 }
 
+bool BluezDBus::read_variant_int16(DBusMessageIter *p_iter, int16_t &p_out) {
+	if (dbus_message_iter_get_arg_type(p_iter) != DBUS_TYPE_VARIANT) {
+		return false;
+	}
+	DBusMessageIter variant_iter;
+	dbus_message_iter_recurse(p_iter, &variant_iter);
+	if (dbus_message_iter_get_arg_type(&variant_iter) != DBUS_TYPE_INT16) {
+		return false;
+	}
+	dbus_int16_t value = 0;
+	dbus_message_iter_get_basic(&variant_iter, &value);
+	p_out = static_cast<int16_t>(value);
+	return true;
+}
+
 bool BluezDBus::read_variant_uint32(DBusMessageIter *p_iter, uint32_t &p_out) {
 	if (dbus_message_iter_get_arg_type(p_iter) != DBUS_TYPE_VARIANT) {
 		return false;
@@ -292,6 +307,12 @@ bool BluezDBus::parse_interface_properties(const godot::String &p_path,
 				uint32_t class_value = 0;
 				if (read_variant_uint32(&entry_iter, class_value)) {
 					p_device.device_class = class_value;
+				}
+			} else if (property_name == "RSSI") {
+				int16_t rssi_value = 0;
+				if (read_variant_int16(&entry_iter, rssi_value)) {
+					p_device.rssi = rssi_value;
+					p_device.has_rssi = true;
 				}
 			}
 		} else if (p_interface == ADAPTER_INTERFACE) {
@@ -574,70 +595,146 @@ bool BluezDBus::get_property(const godot::String &p_path,
 	return read_ok;
 }
 
-bool BluezDBus::get_device_properties(const godot::String &p_device_path, BluezDeviceProperties &p_out_props) {
+bool BluezDBus::set_property_bool(const godot::String &p_path,
+		const godot::String &p_interface,
+		const godot::String &p_property,
+		bool p_value) {
+	DBusMessage *reply = nullptr;
+	const bool ok = send_method_call(BLUEZ_SERVICE,
+			p_path,
+			PROPERTIES_INTERFACE,
+			"Set",
+			&reply,
+			5000,
+			[&p_interface, &p_property, p_value](DBusMessage *p_message) {
+				const godot::CharString iface_utf8 = p_interface.utf8();
+				const godot::CharString prop_utf8 = p_property.utf8();
+				const char *iface_ptr = iface_utf8.get_data();
+				const char *prop_ptr = prop_utf8.get_data();
+				dbus_bool_t dbus_value = p_value ? TRUE : FALSE;
+
+				DBusMessageIter iter, variant_iter;
+				dbus_message_iter_init_append(p_message, &iter);
+				dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &iface_ptr);
+				dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &prop_ptr);
+				dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT, "b", &variant_iter);
+				dbus_message_iter_append_basic(&variant_iter, DBUS_TYPE_BOOLEAN, &dbus_value);
+				dbus_message_iter_close_container(&iter, &variant_iter);
+			});
+	if (reply) {
+		dbus_message_unref(reply);
+	}
+	return ok;
+}
+
+bool BluezDBus::device_set_trusted(const godot::String &p_device_path, bool p_trusted) {
+	return set_property_bool(p_device_path, DEVICE_INTERFACE, "Trusted", p_trusted);
+}
+
+bool BluezDBus::adapter_set_powered(const godot::String &p_adapter_path, bool p_powered) {
+	return set_property_bool(p_adapter_path, ADAPTER_INTERFACE, "Powered", p_powered);
+}
+
+bool BluezDBus::adapter_set_discovery_filter(const godot::String &p_adapter_path, int p_min_rssi,
+		const godot::String &p_transport) {
+	DBusMessage *reply = nullptr;
+	const bool ok = send_method_call(BLUEZ_SERVICE,
+			p_adapter_path,
+			ADAPTER_INTERFACE,
+			"SetDiscoveryFilter",
+			&reply,
+			10000,
+			[p_min_rssi, &p_transport](DBusMessage *p_message) {
+				DBusMessageIter iter, dict_iter, entry_iter, variant_iter;
+				dbus_message_iter_init_append(p_message, &iter);
+				dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict_iter);
+
+				if (p_min_rssi > -127) {
+					const char *rssi_key = "RSSI";
+					dbus_int16_t rssi = static_cast<dbus_int16_t>(p_min_rssi);
+					dbus_message_iter_open_container(&dict_iter, DBUS_TYPE_DICT_ENTRY, nullptr, &entry_iter);
+					dbus_message_iter_append_basic(&entry_iter, DBUS_TYPE_STRING, &rssi_key);
+					dbus_message_iter_open_container(&entry_iter, DBUS_TYPE_VARIANT, "n", &variant_iter);
+					dbus_message_iter_append_basic(&variant_iter, DBUS_TYPE_INT16, &rssi);
+					dbus_message_iter_close_container(&entry_iter, &variant_iter);
+					dbus_message_iter_close_container(&dict_iter, &entry_iter);
+				}
+
+				if (!p_transport.is_empty() && p_transport != "auto") {
+					const godot::CharString transport_utf8 = p_transport.utf8();
+					const char *transport_key = "Transport";
+					const char *transport_ptr = transport_utf8.get_data();
+					dbus_message_iter_open_container(&dict_iter, DBUS_TYPE_DICT_ENTRY, nullptr, &entry_iter);
+					dbus_message_iter_append_basic(&entry_iter, DBUS_TYPE_STRING, &transport_key);
+					dbus_message_iter_open_container(&entry_iter, DBUS_TYPE_VARIANT, "s", &variant_iter);
+					dbus_message_iter_append_basic(&variant_iter, DBUS_TYPE_STRING, &transport_ptr);
+					dbus_message_iter_close_container(&entry_iter, &variant_iter);
+					dbus_message_iter_close_container(&dict_iter, &entry_iter);
+				}
+
+				dbus_message_iter_close_container(&iter, &dict_iter);
+			});
+	if (reply) {
+		dbus_message_unref(reply);
+	}
+	return ok;
+}
+
+bool BluezDBus::adapter_clear_discovery_filter(const godot::String &p_adapter_path) {
+	DBusMessage *reply = nullptr;
+	const bool ok = send_method_call(BLUEZ_SERVICE,
+			p_adapter_path,
+			ADAPTER_INTERFACE,
+			"SetDiscoveryFilter",
+			&reply,
+			10000,
+			[](DBusMessage *p_message) {
+				DBusMessageIter iter, dict_iter;
+				dbus_message_iter_init_append(p_message, &iter);
+				dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &dict_iter);
+				dbus_message_iter_close_container(&iter, &dict_iter);
+			});
+	if (reply) {
+		dbus_message_unref(reply);
+	}
+	return ok;
+}
+
+bool BluezDBus::get_all_device_properties(const godot::String &p_device_path, BluezDeviceProperties &p_out_props) {
 	p_out_props = BluezDeviceProperties();
 	p_out_props.object_path = p_device_path;
 
-	auto read_string_value = [](DBusMessageIter *p_iter, godot::String &p_out) {
-		if (dbus_message_iter_get_arg_type(p_iter) != DBUS_TYPE_STRING) {
-			return false;
-		}
-		const char *value = nullptr;
-		dbus_message_iter_get_basic(p_iter, &value);
-		p_out = dbus_string_to_godot(value);
-		return true;
-	};
-	auto read_bool_value = [](DBusMessageIter *p_iter, bool &p_out) {
-		if (dbus_message_iter_get_arg_type(p_iter) != DBUS_TYPE_BOOLEAN) {
-			return false;
-		}
-		dbus_bool_t value = FALSE;
-		dbus_message_iter_get_basic(p_iter, &value);
-		p_out = value == TRUE;
-		return true;
-	};
-	auto read_uint32_value = [](DBusMessageIter *p_iter, uint32_t &p_out) {
-		const int value_type = dbus_message_iter_get_arg_type(p_iter);
-		if (value_type == DBUS_TYPE_UINT32) {
-			dbus_uint32_t value = 0;
-			dbus_message_iter_get_basic(p_iter, &value);
-			p_out = static_cast<uint32_t>(value);
-			return true;
-		}
-		if (value_type == DBUS_TYPE_UINT16) {
-			dbus_uint16_t value = 0;
-			dbus_message_iter_get_basic(p_iter, &value);
-			p_out = static_cast<uint32_t>(value);
-			return true;
-		}
+	DBusMessage *reply = nullptr;
+	const bool ok = send_method_call(BLUEZ_SERVICE,
+			p_device_path,
+			PROPERTIES_INTERFACE,
+			"GetAll",
+			&reply,
+			5000,
+			[](DBusMessage *p_message) {
+				const char *iface = DEVICE_INTERFACE;
+				dbus_message_append_args(p_message, DBUS_TYPE_STRING, &iface, DBUS_TYPE_INVALID);
+			});
+	if (!ok || !reply) {
 		return false;
-	};
+	}
 
-	bool ok = false;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Address", [&](DBusMessageIter *p_iter) {
-		return read_string_value(p_iter, p_out_props.address);
-	}) || ok;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Name", [&](DBusMessageIter *p_iter) {
-		return read_string_value(p_iter, p_out_props.name);
-	}) || ok;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Alias", [&](DBusMessageIter *p_iter) {
-		return read_string_value(p_iter, p_out_props.alias);
-	}) || ok;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Paired", [&](DBusMessageIter *p_iter) {
-		return read_bool_value(p_iter, p_out_props.paired);
-	}) || ok;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Connected", [&](DBusMessageIter *p_iter) {
-		return read_bool_value(p_iter, p_out_props.connected);
-	}) || ok;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Trusted", [&](DBusMessageIter *p_iter) {
-		return read_bool_value(p_iter, p_out_props.trusted);
-	}) || ok;
-	ok = get_property(p_device_path, DEVICE_INTERFACE, "Class", [&](DBusMessageIter *p_iter) {
-		return read_uint32_value(p_iter, p_out_props.device_class);
-	}) || ok;
+	DBusMessageIter root_iter;
+	if (!dbus_message_iter_init(reply, &root_iter) || dbus_message_iter_get_arg_type(&root_iter) != DBUS_TYPE_ARRAY) {
+		last_error = "Properties.GetAll reply has unexpected format.";
+		dbus_message_unref(reply);
+		return false;
+	}
 
-	p_out_props.valid = ok;
-	return ok;
+	BluezAdapterInfo adapter;
+	parse_interface_properties(p_device_path, DEVICE_INTERFACE, &root_iter, p_out_props, adapter);
+	dbus_message_unref(reply);
+	p_out_props.valid = true;
+	return true;
+}
+
+bool BluezDBus::get_device_properties(const godot::String &p_device_path, BluezDeviceProperties &p_out_props) {
+	return get_all_device_properties(p_device_path, p_out_props);
 }
 
 } // namespace bluetooth
