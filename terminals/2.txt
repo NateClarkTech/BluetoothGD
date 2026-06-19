@@ -1,0 +1,17 @@
+---
+pid: 21652
+cwd: "C:\Users\Nate\Documents\Projects\BluetoothGD"
+command: "cd \"C:\\Users\\Nate\\Documents\\Projects\\BluetoothGD\\demo\" && godot_console.exe --headless --path . --check-only 2>&1"
+started_at: 2026-06-18T23:10:37.601Z
+running_for_ms: 4650001  
+---
+Godot Engine v4.7.dev1.official.bf95b6258 - https://godotengine.org
+
+ERROR: Cannot get class 'BluetoothManager'.
+   at: _instantiate_internal (core/object/class_db.cpp:565)
+WARNING: Node BluetoothManager of type BluetoothManager cannot be created. A placeholder will be created instead.
+   at: instantiate (scene/resources/packed_scene.cpp:333)
+SCRIPT ERROR: Parse Error: Cannot infer the type of "devices" variable because the value doesn't have a set type.
+   at: GDScript::reload (res://scenes/controller_pairing.gd:37)
+ERROR: Failed to load script "res://scenes/controller_pairing.gd" with error "Parse error".
+   at: load (modules/gdscript/gdscript.cpp:2905)

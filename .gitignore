@@ -1,0 +1,16 @@
+build/
+.vs/
+.vscode/
+*.user
+*.suo
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+demo/bin/*.dll
+demo/bin/*.so
+demo/bin/*.dylib
+demo/bin/*.framework/
+!demo/bin/.gitkeep
+!demo/bluetooth_manager.gdextension

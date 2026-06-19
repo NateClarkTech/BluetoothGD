@@ -1,0 +1,226 @@
+[gd_scene format=3 uid="uid://ypx5im3hnb3y"]
+
+[ext_resource type="Script" uid="uid://rrnyvnbr8w1l" path="res://scenes/controller_pairing.gd" id="1_script"]
+
+[node name="ControllerPairing" type="Control" unique_id=531055918]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="MarginContainer" type="MarginContainer" parent="." unique_id=1826522415]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 16
+
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer" unique_id=1956033639]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="MarginContainer/MainVBox" unique_id=405414778]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "Bluetooth Controller Pairing"
+horizontal_alignment = 1
+
+[node name="StatusLabel" type="Label" parent="MarginContainer/MainVBox" unique_id=283379965]
+unique_name_in_owner = true
+layout_mode = 2
+text = "Ready"
+autowrap_mode = 3
+
+[node name="ScanPanel" type="VBoxContainer" parent="MarginContainer/MainVBox" unique_id=2084823129]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ScanActivityLabel" type="Label" parent="MarginContainer/MainVBox/ScanPanel" unique_id=1549061178]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.75, 1, 1)
+text = "Scanning for nearby controllers..."
+autowrap_mode = 3
+
+[node name="ScanProgressBar" type="ProgressBar" parent="MarginContainer/MainVBox/ScanPanel" unique_id=229417624]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 14)
+layout_mode = 2
+show_percentage = false
+
+[node name="ButtonRow" type="HBoxContainer" parent="MarginContainer/MainVBox" unique_id=326548081]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="StartScanButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow" unique_id=1433929000]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Start Scan"
+
+[node name="StopScanButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow" unique_id=1378898658]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Stop Scan"
+
+[node name="RefreshPairedButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow" unique_id=1349907522]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Refresh Paired"
+
+[node name="DevicesSection" type="VBoxContainer" parent="MarginContainer/MainVBox" unique_id=588335558]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 3.0
+theme_override_constants/separation = 4
+
+[node name="DevicesFilterRow" type="HBoxContainer" parent="MarginContainer/MainVBox/DevicesSection" unique_id=519875277]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DevicesHeader" type="Label" parent="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow" unique_id=1486905350]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 15
+text = "Devices"
+
+[node name="NamedOnlyCheckButton" type="CheckButton" parent="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow" unique_id=184125459]
+unique_name_in_owner = true
+layout_mode = 2
+button_pressed = true
+text = "Named devices only"
+
+[node name="DevicesPanel" type="PanelContainer" parent="MarginContainer/MainVBox/DevicesSection" unique_id=920777917]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DevicesMargin" type="MarginContainer" parent="MarginContainer/MainVBox/DevicesSection/DevicesPanel" unique_id=297175606]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="DeviceList" type="ItemList" parent="MarginContainer/MainVBox/DevicesSection/DevicesPanel/DevicesMargin" unique_id=579140723]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 140)
+layout_mode = 2
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="ActionRow" type="HBoxContainer" parent="MarginContainer/MainVBox" unique_id=505810227]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="DeviceActionButton" type="Button" parent="MarginContainer/MainVBox/ActionRow" unique_id=1925631806]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Select a device"
+
+[node name="UnpairButton" type="Button" parent="MarginContainer/MainVBox/ActionRow" unique_id=1001739998]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+text = "Unpair"
+
+[node name="LogSection" type="VBoxContainer" parent="MarginContainer/MainVBox" unique_id=1203016000]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 1.5
+theme_override_constants/separation = 4
+
+[node name="LogHeader" type="Label" parent="MarginContainer/MainVBox/LogSection" unique_id=331039426]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Event Log"
+
+[node name="LogPanel" type="PanelContainer" parent="MarginContainer/MainVBox/LogSection" unique_id=133203857]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="LogMargin" type="MarginContainer" parent="MarginContainer/MainVBox/LogSection/LogPanel" unique_id=1061705788]
+layout_mode = 2
+theme_override_constants/margin_left = 4
+theme_override_constants/margin_top = 4
+theme_override_constants/margin_right = 4
+theme_override_constants/margin_bottom = 4
+
+[node name="LogOutput" type="RichTextLabel" parent="MarginContainer/MainVBox/LogSection/LogPanel/LogMargin" unique_id=84882913]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 80)
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+scroll_following = true
+
+[node name="ToggleAdvancedButton" type="Button" parent="MarginContainer/MainVBox" unique_id=648564399]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 4
+text = "Show Advanced Log"
+
+[node name="AdvancedPanel" type="PanelContainer" parent="MarginContainer/MainVBox" unique_id=1491597490]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 148)
+layout_mode = 2
+
+[node name="AdvancedMargin" type="MarginContainer" parent="MarginContainer/MainVBox/AdvancedPanel" unique_id=58718905]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="AdvancedVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin" unique_id=967693811]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 4
+
+[node name="AdvancedHeader" type="Label" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox" unique_id=1478252764]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Advanced Log (connect / disconnect / errors)"
+
+[node name="AdvancedScroll" type="ScrollContainer" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox" unique_id=142372725]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 110)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 2
+
+[node name="AdvancedLog" type="RichTextLabel" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox/AdvancedScroll" unique_id=1103575823]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/normal_font_size = 13
+fit_content = true
+scroll_active = false
+
+[connection signal="pressed" from="MarginContainer/MainVBox/ButtonRow/StartScanButton" to="." method="_on_start_scan_pressed"]
+[connection signal="pressed" from="MarginContainer/MainVBox/ButtonRow/StopScanButton" to="." method="_on_stop_scan_pressed"]
+[connection signal="pressed" from="MarginContainer/MainVBox/ButtonRow/RefreshPairedButton" to="." method="_on_refresh_paired_pressed"]
+[connection signal="toggled" from="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow/NamedOnlyCheckButton" to="." method="_on_named_only_toggled"]
+[connection signal="pressed" from="MarginContainer/MainVBox/ActionRow/DeviceActionButton" to="." method="_on_device_action_pressed"]
+[connection signal="pressed" from="MarginContainer/MainVBox/ActionRow/UnpairButton" to="." method="_on_unpair_pressed"]
+[connection signal="pressed" from="MarginContainer/MainVBox/ToggleAdvancedButton" to="." method="_on_toggle_advanced_pressed"]
