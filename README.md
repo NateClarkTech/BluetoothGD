@@ -39,7 +39,7 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 
 **Currently fully working:** Windows desktop only.
 
-Mobile platforms are listed because they are first-class targets in the project roadmap, but **no Android or iOS backend ships today**. Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at runtime to gate features per platform.
+Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at runtime to gate features per platform.
 
 ## Requirements
 
