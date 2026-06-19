@@ -84,6 +84,14 @@ if(WIN32)
     target_compile_definitions(${TARGET_NAME} PRIVATE _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
     target_compile_options(${TARGET_NAME} PRIVATE /EHsc /std:c++20)
     if(MSVC)
+        # MSVC multi-config generators append /Debug or /Release to output dirs by default.
+        foreach(CONFIG DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+            string(TOUPPER ${CONFIG} CONFIG_UPPER)
+            set_target_properties(${TARGET_NAME} PROPERTIES
+                RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${OUTPUT_DIR}"
+                LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${OUTPUT_DIR}"
+            )
+        endforeach()
         set_target_properties(${TARGET_NAME} PROPERTIES
             PDB_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
         )

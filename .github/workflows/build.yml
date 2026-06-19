@@ -6,9 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # godot-cpp compiles hundreds of large translation units; unlimited
+  # parallelism exhausts the 7 GB Linux runner and the job is SIGTERM'd.
+  CMAKE_BUILD_PARALLEL_LEVEL: 2
+
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,10 +33,10 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build extension
-        run: cmake --build build --parallel
+        run: cmake --build build --target bluetooth_manager --parallel ${{ env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
       - name: Build unit tests
-        run: cmake --build build --target bluetooth_manager_tests --parallel
+        run: cmake --build build --target bluetooth_manager_tests --parallel ${{ env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
       - name: Run unit tests
         run: ./build/tests/bluetooth_manager_tests
@@ -36,9 +46,11 @@ jobs:
         with:
           name: bluetooth_manager-linux-debug
           path: demo/bin/libbluetooth_manager.*.so
+          if-no-files-found: error
 
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,10 +60,10 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build extension
-        run: cmake --build build --config Debug --parallel
+        run: cmake --build build --config Debug --target bluetooth_manager --parallel ${{ env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
       - name: Build unit tests
-        run: cmake --build build --config Debug --target bluetooth_manager_tests --parallel
+        run: cmake --build build --config Debug --target bluetooth_manager_tests --parallel ${{ env.CMAKE_BUILD_PARALLEL_LEVEL }}
 
       - name: Run unit tests
         run: ./build/tests/Debug/bluetooth_manager_tests.exe
@@ -61,3 +73,4 @@ jobs:
         with:
           name: bluetooth_manager-windows-debug
           path: demo/bin/libbluetooth_manager.*.dll
+          if-no-files-found: error
