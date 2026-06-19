@@ -41,14 +41,17 @@ public:
 private:
 	void emit(const BluetoothEvent &p_event);
 	void emit_error(const godot::String &p_operation, const godot::String &p_message);
+	void emit_device_removed(const godot::String &p_address);
+	void emit_paired_devices_updated();
+	void remove_device_from_cache(const godot::String &p_key, const godot::String &p_address);
 	bool ensure_winrt_ready();
 
 	void handle_device_added(const winrt::Windows::Devices::Enumeration::DeviceInformation &p_info);
 	void handle_device_updated(const winrt::Windows::Devices::Enumeration::DeviceInformationUpdate &p_update);
 	void handle_device_removed(const winrt::Windows::Devices::Enumeration::DeviceInformationUpdate &p_update);
 
-	void enumerate_snapshot(const winrt::hstring &p_selector);
-	void enumerate_hid_gamepads();
+	void enumerate_snapshot(const winrt::hstring &p_selector, bool p_emit_events = true, bool p_force_emit = true);
+	void enumerate_hid_gamepads(bool p_emit_events = true, bool p_force_emit = true);
 	void start_device_watcher(const winrt::hstring &p_selector,
 			winrt::Windows::Devices::Enumeration::DeviceInformationKind p_kind =
 					winrt::Windows::Devices::Enumeration::DeviceInformationKind::Unknown);

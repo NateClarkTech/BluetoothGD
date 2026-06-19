@@ -27,6 +27,8 @@ public:
 	virtual bool is_connected(const godot::String &p_address) = 0;
 	virtual bool is_paired(const godot::String &p_address) = 0;
 
+	virtual void poll() {}
+
 	std::function<void(const BluetoothEvent &)> on_event;
 };
 

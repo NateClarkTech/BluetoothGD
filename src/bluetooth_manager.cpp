@@ -11,6 +11,7 @@ void BluetoothManager::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("pair_device", "address"), &BluetoothManager::pair_device);
 	ClassDB::bind_method(D_METHOD("unpair_device", "address"), &BluetoothManager::unpair_device);
+	ClassDB::bind_method(D_METHOD("refresh_paired_devices"), &BluetoothManager::refresh_paired_devices);
 	ClassDB::bind_method(D_METHOD("get_paired_devices"), &BluetoothManager::get_paired_devices);
 	ClassDB::bind_method(D_METHOD("is_paired", "address"), &BluetoothManager::is_paired);
 
@@ -19,10 +20,15 @@ void BluetoothManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_connected", "address"), &BluetoothManager::is_connected);
 
 	ClassDB::bind_method(D_METHOD("normalize_address", "address"), &BluetoothManager::normalize_address);
+	ClassDB::bind_method(D_METHOD("is_valid_bluetooth_address", "address"), &BluetoothManager::is_valid_bluetooth_address);
+	ClassDB::bind_method(D_METHOD("can_unpair_while_connected"), &BluetoothManager::can_unpair_while_connected);
 	ClassDB::bind_method(D_METHOD("is_bluetooth_available"), &BluetoothManager::is_bluetooth_available);
 	ClassDB::bind_method(D_METHOD("get_platform_name"), &BluetoothManager::get_platform_name);
 
 	ADD_SIGNAL(MethodInfo("device_found", PropertyInfo(Variant::DICTIONARY, "device_info")));
+	ADD_SIGNAL(MethodInfo("device_removed", PropertyInfo(Variant::STRING, "address")));
+	ADD_SIGNAL(MethodInfo("devices_refreshed"));
+	ADD_SIGNAL(MethodInfo("bluetooth_ready"));
 	ADD_SIGNAL(MethodInfo("scan_started"));
 	ADD_SIGNAL(MethodInfo("scan_stopped"));
 	ADD_SIGNAL(MethodInfo("pairing_started", PropertyInfo(Variant::STRING, "address")));
@@ -61,6 +67,21 @@ void BluetoothManager::enqueue_command(bluetooth::CommandType p_type, const Stri
 	worker.enqueue_command(command);
 }
 
+String BluetoothManager::resolve_command_address(const String &p_address) const {
+	if (bluetooth::is_valid_bluetooth_address(p_address)) {
+		return bluetooth::normalize_address(p_address);
+	}
+	return p_address;
+}
+
+void BluetoothManager::maybe_emit_bluetooth_ready() {
+	if (bluetooth_ready_emitted || !backend_available) {
+		return;
+	}
+	bluetooth_ready_emitted = true;
+	emit_signal("bluetooth_ready");
+}
+
 void BluetoothManager::handle_event(const bluetooth::BluetoothEvent &p_event) {
 	switch (p_event.type) {
 		case bluetooth::EventType::SCAN_STARTED:
@@ -73,6 +94,11 @@ void BluetoothManager::handle_event(const bluetooth::BluetoothEvent &p_event) {
 			upsert_device(p_event.device);
 			emit_signal("device_found", p_event.device.to_dictionary());
 			break;
+		case bluetooth::EventType::DEVICE_REMOVED: {
+			const String address = p_event.address.is_empty() ? p_event.device.address : p_event.address;
+			remove_device_for_address(address);
+			break;
+		}
 		case bluetooth::EventType::PAIRING_STARTED:
 			emit_signal("pairing_started", p_event.address);
 			break;
@@ -94,6 +120,9 @@ void BluetoothManager::handle_event(const bluetooth::BluetoothEvent &p_event) {
 			emit_signal("connection_changed", p_event.address, p_event.connected, p_event.message);
 			break;
 		case bluetooth::EventType::PAIRED_DEVICES_UPDATED:
+			sync_devices_from_snapshot(p_event.devices);
+			emit_signal("devices_refreshed");
+			maybe_emit_bluetooth_ready();
 			break;
 		case bluetooth::EventType::ERROR_OCCURRED:
 			if (p_event.operation == "initialize") {
@@ -112,6 +141,46 @@ String BluetoothManager::canonical_device_key(const bluetooth::DeviceInfo &p_dev
 		return p_device.device_id;
 	}
 	return p_device.address;
+}
+
+void BluetoothManager::remove_device_for_address(const String &p_address) {
+	PackedStringArray keys_to_remove;
+	for (const KeyValue<String, bluetooth::DeviceInfo> &item : discovered_devices) {
+		if (bluetooth::addresses_match(item.key, p_address) || bluetooth::addresses_match(item.value.address, p_address)) {
+			keys_to_remove.append(item.key);
+		}
+	}
+	if (keys_to_remove.is_empty()) {
+		return;
+	}
+
+	String signal_address = p_address;
+	for (int i = 0; i < keys_to_remove.size(); i++) {
+		if (discovered_devices.has(keys_to_remove[i])) {
+			const bluetooth::DeviceInfo &info = discovered_devices[keys_to_remove[i]];
+			if (bluetooth::is_valid_bluetooth_address(info.address)) {
+				signal_address = bluetooth::normalize_address(info.address);
+			} else if (!info.address.is_empty()) {
+				signal_address = info.address;
+			}
+		}
+		discovered_devices.erase(keys_to_remove[i]);
+		paired_devices.erase(keys_to_remove[i]);
+	}
+
+	emit_signal("device_removed", signal_address);
+}
+
+void BluetoothManager::sync_devices_from_snapshot(const Array &p_devices) {
+	discovered_devices.clear();
+	paired_devices.clear();
+	for (int i = 0; i < p_devices.size(); i++) {
+		const Variant entry = p_devices[i];
+		if (entry.get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		upsert_device(bluetooth::DeviceInfo::from_dictionary(entry));
+	}
 }
 
 void BluetoothManager::update_devices_for_address(const String &p_address,
@@ -208,11 +277,15 @@ Array BluetoothManager::get_discovered_devices() const {
 }
 
 void BluetoothManager::pair_device(const String &p_address) {
-	enqueue_command(bluetooth::CommandType::PAIR_DEVICE, normalize_address(p_address));
+	enqueue_command(bluetooth::CommandType::PAIR_DEVICE, resolve_command_address(p_address));
 }
 
 void BluetoothManager::unpair_device(const String &p_address) {
-	enqueue_command(bluetooth::CommandType::UNPAIR_DEVICE, normalize_address(p_address));
+	enqueue_command(bluetooth::CommandType::UNPAIR_DEVICE, resolve_command_address(p_address));
+}
+
+void BluetoothManager::refresh_paired_devices() {
+	enqueue_command(bluetooth::CommandType::REFRESH_PAIRED_DEVICES);
 }
 
 Array BluetoothManager::get_paired_devices() const {
@@ -234,11 +307,11 @@ bool BluetoothManager::is_paired(const String &p_address) const {
 }
 
 void BluetoothManager::connect_device(const String &p_address) {
-	enqueue_command(bluetooth::CommandType::CONNECT_DEVICE, normalize_address(p_address));
+	enqueue_command(bluetooth::CommandType::CONNECT_DEVICE, resolve_command_address(p_address));
 }
 
 void BluetoothManager::disconnect_device(const String &p_address) {
-	enqueue_command(bluetooth::CommandType::DISCONNECT_DEVICE, normalize_address(p_address));
+	enqueue_command(bluetooth::CommandType::DISCONNECT_DEVICE, resolve_command_address(p_address));
 }
 
 bool BluetoothManager::is_connected(const String &p_address) const {
@@ -257,6 +330,20 @@ bool BluetoothManager::is_connected(const String &p_address) const {
 
 String BluetoothManager::normalize_address(const String &p_address) const {
 	return bluetooth::normalize_address(p_address);
+}
+
+bool BluetoothManager::is_valid_bluetooth_address(const String &p_address) const {
+	return bluetooth::is_valid_bluetooth_address(p_address);
+}
+
+bool BluetoothManager::can_unpair_while_connected() const {
+#if defined(_WIN32)
+	return false;
+#elif defined(__linux__)
+	return true;
+#else
+	return false;
+#endif
 }
 
 bool BluetoothManager::is_bluetooth_available() const {

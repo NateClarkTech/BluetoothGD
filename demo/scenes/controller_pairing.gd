@@ -1,16 +1,18 @@
 extends Control
 
-enum DeviceAction { NONE, PAIR, CONNECT, DISCONNECT }
+const DeviceListPresenterScript := preload("res://scripts/device_list_presenter.gd")
 
-@onready var device_list: ItemList = %DeviceList
+enum DeviceAction { NONE, PAIR, CONNECT, DISCONNECT, UNPAIR }
+
+const MAX_LOG_LINES := 500
+
+@onready var device_list: Tree = %DeviceList
 @onready var status_label: Label = %StatusLabel
-@onready var log_output: RichTextLabel = %LogOutput
-@onready var advanced_log: RichTextLabel = %AdvancedLog
-@onready var advanced_scroll: ScrollContainer = %AdvancedScroll
+@onready var log_output: TextEdit = %LogOutput
+@onready var advanced_log: TextEdit = %AdvancedLog
 @onready var scan_activity_label: Label = %ScanActivityLabel
 @onready var scan_progress_bar: ProgressBar = %ScanProgressBar
-@onready var start_scan_button: Button = %StartScanButton
-@onready var stop_scan_button: Button = %StopScanButton
+@onready var scan_button: Button = %ScanButton
 @onready var toggle_advanced_button: Button = %ToggleAdvancedButton
 @onready var advanced_panel: PanelContainer = %AdvancedPanel
 @onready var devices_header: Label = %DevicesHeader
@@ -20,27 +22,27 @@ enum DeviceAction { NONE, PAIR, CONNECT, DISCONNECT }
 
 var _is_scanning: bool = false
 var _advanced_visible: bool = false
-var _named_only_filter: bool = true
 var _scan_elapsed_sec: float = 0.0
 var _devices_found_this_scan: int = 0
 var _scan_tween: Tween = null
 var _dot_timer: float = 0.0
 var _dot_count: int = 0
-var _discovery_sequence: int = 0
-var _device_cache: Dictionary = {}
-var _current_device_action: DeviceAction = DeviceAction.NONE
+var _bluetooth_ready: bool = false
+var _pending_operation: DeviceAction = DeviceAction.NONE
+var _pending_address: String = ""
+var _presenter: Node
 
 
 func _ready() -> void:
+	_setup_device_list()
+	_setup_presenter()
 	_connect_signals()
-	device_list.item_selected.connect(_on_device_selected)
+	_set_scan_ui_active(false)
+	_set_advanced_visible(false)
+	_set_status("Initializing Bluetooth...")
 	_log("Bluetooth platform: %s" % Bluetooth.get_platform_name())
 	_log("Bluetooth available: %s" % str(Bluetooth.is_bluetooth_available()))
 	_log_advanced("INFO", "Advanced log started — tracks connect/disconnect attempts and errors.")
-	_sync_cache_from_bluetooth()
-	_refresh_device_list()
-	_set_scan_ui_active(false)
-	_set_advanced_visible(false)
 	_update_device_action_button()
 
 
@@ -57,8 +59,21 @@ func _process(delta: float) -> void:
 		scan_activity_label.text = "Scanning for nearby controllers%s  (%.0fs elapsed)" % [dots, _scan_elapsed_sec]
 
 
+func _setup_presenter() -> void:
+	_presenter = DeviceListPresenterScript.new()
+	_presenter.name = "DeviceListPresenter"
+	add_child(_presenter)
+	_presenter.setup(device_list)
+	_presenter.named_only_filter = named_only_checkbox.button_pressed
+	_presenter.selection_changed.connect(_on_presenter_selection_changed)
+	_presenter.counts_changed.connect(_on_presenter_counts_changed)
+
+
 func _connect_signals() -> void:
+	Bluetooth.bluetooth_ready.connect(_on_bluetooth_ready)
+	Bluetooth.devices_refreshed.connect(_on_devices_refreshed)
 	Bluetooth.device_found.connect(_on_device_found)
+	Bluetooth.device_removed.connect(_on_device_removed)
 	Bluetooth.scan_started.connect(_on_scan_started)
 	Bluetooth.scan_stopped.connect(_on_scan_stopped)
 	Bluetooth.pairing_started.connect(_on_pairing_started)
@@ -68,20 +83,60 @@ func _connect_signals() -> void:
 	Bluetooth.error_occurred.connect(_on_error_occurred)
 
 
+func _on_bluetooth_ready() -> void:
+	_bluetooth_ready = true
+	_presenter.rebuild_from_bluetooth()
+	_set_scan_ui_active(_is_scanning)
+	_set_status("Ready")
+	_log("Bluetooth backend ready.")
+
+
+func _on_devices_refreshed() -> void:
+	if _bluetooth_ready:
+		_presenter.rebuild_from_bluetooth()
+
+
+func _on_presenter_selection_changed(_address: String) -> void:
+	_update_device_action_button()
+
+
+func _on_presenter_counts_changed(visible_count: int, total_count: int, named_count: int) -> void:
+	if _presenter.named_only_filter:
+		devices_header.text = "Devices (%d shown, %d cached, %d named)" % [visible_count, total_count, named_count]
+	else:
+		devices_header.text = "Devices (%d total, %d named)" % [total_count, named_count]
+
+
 func _log(message: String) -> void:
-	log_output.append_text(message + "\n")
+	log_output.text += message + "\n"
+	_trim_log(log_output)
+	_scroll_text_edit_to_end(log_output)
 
 
 func _log_advanced(category: String, message: String) -> void:
 	var stamp := Time.get_time_string_from_system()
-	advanced_log.append_text("[%s] [%s] %s\n" % [stamp, category, message])
-	call_deferred("_scroll_advanced_log_to_end")
+	advanced_log.text += "[%s] [%s] %s\n" % [stamp, category, message]
+	_trim_log(advanced_log)
+	call_deferred("_scroll_text_edit_to_end", advanced_log)
 
 
-func _scroll_advanced_log_to_end() -> void:
-	var bar := advanced_scroll.get_v_scroll_bar()
-	if bar:
-		bar.value = bar.max_value
+func _trim_log(text_edit: TextEdit) -> void:
+	var line_count := text_edit.get_line_count()
+	if line_count <= MAX_LOG_LINES:
+		return
+	var lines := text_edit.text.split("\n")
+	if lines.size() <= MAX_LOG_LINES:
+		return
+	text_edit.text = "\n".join(lines.slice(lines.size() - MAX_LOG_LINES))
+
+
+func _scroll_text_edit_to_end(text_edit: TextEdit) -> void:
+	var line_count := text_edit.get_line_count()
+	if line_count > 0:
+		text_edit.set_caret_line(line_count - 1)
+	var scroll_bar := text_edit.get_v_scroll_bar()
+	if scroll_bar:
+		scroll_bar.value = scroll_bar.max_value
 
 
 func _set_status(message: String) -> void:
@@ -98,99 +153,33 @@ func _on_toggle_advanced_pressed() -> void:
 	_set_advanced_visible(not _advanced_visible)
 
 
-func _on_device_selected(_index: int, _at_position: Vector2 = Vector2.ZERO) -> void:
-	_update_device_action_button()
+func _setup_device_list() -> void:
+	device_list.columns = 5
+	device_list.column_titles_visible = true
+	device_list.hide_root = true
+	device_list.set_column_title(0, "Name")
+	device_list.set_column_title(1, "Address")
+	device_list.set_column_title(2, "Type")
+	device_list.set_column_title(3, "Paired")
+	device_list.set_column_title(4, "Connected")
+	device_list.set_column_expand(0, true)
+	device_list.set_column_expand(1, false)
+	device_list.set_column_expand(2, false)
+	device_list.set_column_expand(3, false)
+	device_list.set_column_expand(4, false)
+	device_list.set_column_custom_minimum_width(1, 170)
+	device_list.set_column_custom_minimum_width(2, 72)
+	device_list.set_column_custom_minimum_width(3, 72)
+	device_list.set_column_custom_minimum_width(4, 88)
 
 
 func _on_named_only_toggled(enabled: bool) -> void:
-	_named_only_filter = enabled
-	_refresh_device_list()
-	var hidden_count := _device_cache.size() - _count_visible_devices()
+	_presenter.set_named_only_filter(enabled)
+	var hidden_count: int = _presenter.get_cached_count() - _presenter.get_visible_count()
 	if enabled and hidden_count > 0:
-		_log("Named-only filter enabled — %d unnamed device(s) hidden but still cached." % hidden_count)
+		_log("Named-only filter enabled — %d unnamed device(s) hidden." % hidden_count)
 	elif not enabled and hidden_count > 0:
-		_log("Named-only filter disabled — showing all %d cached device(s)." % _device_cache.size())
-
-
-func _device_address(device_info: Dictionary) -> String:
-	return device_info.get("address", "")
-
-
-func _normalized_address(address: String) -> String:
-	return Bluetooth.normalize_address(address)
-
-
-func _is_mac_address(address: String) -> bool:
-	var parts := _normalized_address(address).split(":", false)
-	return parts.size() == 6 and parts[0].length() == 2
-
-
-func _addresses_match(a: String, b: String) -> bool:
-	var na := _normalized_address(a)
-	var nb := _normalized_address(b)
-	if na == nb:
-		return true
-	if _is_mac_address(na) and (b.contains(na.replace(":", "")) or b.contains(na)):
-		return true
-	if _is_mac_address(nb) and (a.contains(nb.replace(":", "")) or a.contains(nb)):
-		return true
-	return false
-
-
-func _cache_key_for(device_info: Dictionary) -> String:
-	var address: String = device_info.get("address", "")
-	if _is_mac_address(address):
-		return _normalized_address(address)
-	var device_id: String = device_info.get("device_id", "")
-	if not device_id.is_empty():
-		return device_id
-	return address
-
-
-func _has_friendly_name(device_info: Dictionary) -> bool:
-	var name: String = device_info.get("name", "").strip_edges()
-	if name.is_empty():
-		return false
-	if name.begins_with("Unknown Device"):
-		return false
-	if name == "HID Gamepad":
-		return false
-	return true
-
-
-func _get_selected_address() -> String:
-	var selected := device_list.get_selected_items()
-	if selected.is_empty():
-		return ""
-	return device_list.get_item_metadata(selected[0])
-
-
-func _get_device_state(address: String) -> Dictionary:
-	if address.is_empty():
-		return {"paired": false, "connected": false, "address": "", "name": ""}
-
-	var info: Dictionary = {}
-	for entry in _device_cache.values():
-		var cached: Dictionary = entry.get("info", {})
-		if _addresses_match(cached.get("address", ""), address) or _addresses_match(entry.get("info", {}).get("device_id", ""), address):
-			info = cached
-			break
-
-	var resolved_address: String = info.get("address", address)
-	var paired: bool = info.get("paired", false)
-	var connected: bool = info.get("connected", false)
-
-	if Bluetooth.call("is_paired", resolved_address):
-		paired = true
-	if Bluetooth.call("is_connected", resolved_address):
-		connected = true
-
-	return {
-		"address": resolved_address,
-		"name": _display_name_for(info) if not info.is_empty() else resolved_address,
-		"paired": paired,
-		"connected": connected,
-	}
+		_log("Named-only filter disabled — showing all cached devices.")
 
 
 func _resolve_device_action(state: Dictionary) -> DeviceAction:
@@ -215,125 +204,49 @@ func _action_label(action: DeviceAction) -> String:
 			return "Select a device"
 
 
+func _set_pending_operation(action: DeviceAction, address: String) -> void:
+	_pending_operation = action
+	_pending_address = address
+	_update_action_buttons_enabled()
+
+
+func _clear_pending_operation() -> void:
+	_pending_operation = DeviceAction.NONE
+	_pending_address = ""
+	_update_action_buttons_enabled()
+
+
+func _update_action_buttons_enabled() -> void:
+	var busy := _pending_operation != DeviceAction.NONE
+	device_action_button.disabled = busy or _resolve_device_action(_presenter.get_device_state(_presenter.get_selected_address())) == DeviceAction.NONE
+	unpair_button.disabled = busy or not _presenter.get_device_state(_presenter.get_selected_address()).get("paired", false)
+
+
 func _update_device_action_button() -> void:
-	var address := _get_selected_address()
-	var state := _get_device_state(address)
-	_current_device_action = _resolve_device_action(state)
+	var address: String = _presenter.get_selected_address()
+	var state: Dictionary = _presenter.get_device_state(address)
+	var action: DeviceAction = _resolve_device_action(state)
 
-	if _current_device_action == DeviceAction.NONE:
+	if action == DeviceAction.NONE:
 		device_action_button.text = "Select a device"
-		device_action_button.disabled = true
-		unpair_button.disabled = true
-		return
-
-	device_action_button.text = _action_label(_current_device_action)
-	device_action_button.disabled = false
-	unpair_button.disabled = not state.get("paired", false)
-
-
-func _upsert_device_cache(device_info: Dictionary) -> void:
-	var key := _cache_key_for(device_info)
-	if key.is_empty():
-		return
-
-	var stale_keys: PackedStringArray = []
-	for cache_key in _device_cache:
-		if cache_key == key:
-			continue
-		var existing: Dictionary = _device_cache[cache_key].get("info", {})
-		if not device_info.get("device_id", "").is_empty() and existing.get("device_id", "") == device_info.get("device_id", ""):
-			stale_keys.append(cache_key)
-		elif _addresses_match(existing.get("address", ""), device_info.get("address", "")):
-			stale_keys.append(cache_key)
-	for stale_key in stale_keys:
-		_device_cache.erase(stale_key)
-
-	if _device_cache.has(key):
-		var entry: Dictionary = _device_cache[key]
-		entry["info"] = device_info.duplicate(true)
-		_device_cache[key] = entry
 	else:
-		_discovery_sequence += 1
-		_device_cache[key] = {
-			"info": device_info.duplicate(true),
-			"discovered_order": _discovery_sequence,
-		}
+		device_action_button.text = _action_label(action)
+	_update_action_buttons_enabled()
 
 
-func _update_cached_state(address: String, state: Dictionary) -> void:
-	for cache_key in _device_cache:
-		var info: Dictionary = _device_cache[cache_key].get("info", {})
-		if _addresses_match(info.get("address", ""), address) or _addresses_match(cache_key, address):
-			for field in state:
-				info[field] = state[field]
-			_device_cache[cache_key]["info"] = info
-
-
-func _sync_cache_from_bluetooth() -> void:
-	for device_info in Bluetooth.get_discovered_devices():
-		_upsert_device_cache(device_info)
-
-
-func _get_sorted_cache_entries() -> Array:
-	var entries: Array = []
-	for cache_key in _device_cache:
-		entries.append(_device_cache[cache_key])
-
-	entries.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		var a_info: Dictionary = a.get("info", {})
-		var b_info: Dictionary = b.get("info", {})
-		var a_named: bool = _has_friendly_name(a_info)
-		var b_named: bool = _has_friendly_name(b_info)
-		if a_named != b_named:
-			return a_named
-		return a.get("discovered_order", 0) < b.get("discovered_order", 0)
-	)
-	return entries
-
-
-func _count_visible_devices() -> int:
-	var count := 0
-	for entry in _get_sorted_cache_entries():
-		var device_info: Dictionary = entry.get("info", {})
-		if _named_only_filter and not _has_friendly_name(device_info):
-			continue
-		count += 1
-	return count
-
-
-func _count_named_devices() -> int:
-	var count := 0
-	for entry in _device_cache.values():
-		if _has_friendly_name(entry.get("info", {})):
-			count += 1
-	return count
-
-
-func _update_devices_header(visible_count: int) -> void:
-	var cached_count := _device_cache.size()
-	var named_count := _count_named_devices()
-	if _named_only_filter:
-		devices_header.text = "Devices (%d shown, %d cached, %d named)" % [visible_count, cached_count, named_count]
-	else:
-		devices_header.text = "Devices (%d total, %d named)" % [cached_count, named_count]
-
-
-func _display_name_for(device_info: Dictionary) -> String:
-	var name: String = device_info.get("name", "").strip_edges()
-	var address: String = _device_address(device_info)
-	if name.is_empty():
-		if address.contains(":"):
-			return "Unknown Device (%s)" % address
-		return "Unknown Device"
-	return name
+func _punch_ui(button: Button) -> void:
+	var tw := create_tween()
+	tw.tween_property(button, "scale", Vector2(0.92, 0.92), 0.05)
+	tw.tween_property(button, "scale", Vector2.ONE, 0.08).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
 
 
 func _set_scan_ui_active(active: bool) -> void:
 	_is_scanning = active
+	_presenter.set_scanning(active)
 	scan_activity_label.visible = active
 	scan_progress_bar.visible = active
-	start_scan_button.disabled = active
-	stop_scan_button.disabled = not active
+	scan_button.text = "Stop Scan" if active else "Start Scan"
+	scan_button.disabled = not _bluetooth_ready
 
 	if active:
 		_start_scan_animation()
@@ -356,71 +269,33 @@ func _stop_scan_animation() -> void:
 	scan_progress_bar.value = 0.0
 
 
-func _refresh_device_list() -> void:
-	var selected_address := _get_selected_address()
-	device_list.clear()
+func _on_scan_button_pressed() -> void:
+	_punch_ui(scan_button)
+	if _is_scanning:
+		_set_status("Stopping scan...")
+		_log("Stop scan requested.")
+		Bluetooth.stop_scan()
+		return
 
-	_sync_cache_from_bluetooth()
-
-	var visible_count := 0
-	for entry in _get_sorted_cache_entries():
-		var device_info: Dictionary = entry.get("info", {})
-		if _named_only_filter and not _has_friendly_name(device_info):
-			continue
-
-		var address: String = _device_address(device_info)
-		var name: String = _display_name_for(device_info)
-		var paired: bool = device_info.get("paired", false)
-		var connected: bool = device_info.get("connected", false)
-		var device_class: String = device_info.get("device_class", "unknown")
-
-		var suffix := ""
-		if not paired:
-			suffix += " [Unpaired]"
-		if paired:
-			suffix += " [Paired]"
-		if connected:
-			suffix += " [Connected]"
-
-		device_list.add_item("%s (%s) [%s]%s" % [name, address, device_class, suffix])
-		var item_index := device_list.item_count - 1
-		device_list.set_item_metadata(item_index, address)
-		if address == selected_address:
-			device_list.select(item_index)
-		visible_count += 1
-
-	_update_devices_header(visible_count)
-	_update_device_action_button()
-
-
-func _on_start_scan_pressed() -> void:
 	_devices_found_this_scan = 0
 	_scan_elapsed_sec = 0.0
 	_dot_count = 0
 	_dot_timer = 0.0
-	_sync_cache_from_bluetooth()
-	_refresh_device_list()
-	_set_scan_ui_active(true)
 	_set_status("Starting Bluetooth scan...")
 	_log("Scan requested — known devices stay listed; new ones appear as they are found.")
 	Bluetooth.start_scan()
 
 
-func _on_stop_scan_pressed() -> void:
-	_set_status("Stopping scan...")
-	_log("Stop scan requested.")
-	Bluetooth.stop_scan()
-
-
 func _on_device_action_pressed() -> void:
-	var address := _get_selected_address()
+	_punch_ui(device_action_button)
+	var address: String = _presenter.get_selected_address()
 	if address.is_empty():
 		_set_status("Select a device first.")
 		_log_advanced("ERROR", "Device action blocked — no device selected.")
 		return
 
-	var state := _get_device_state(address)
-	var action := _resolve_device_action(state)
+	var state: Dictionary = _presenter.get_device_state(address)
+	var action: DeviceAction = _resolve_device_action(state)
 	var label: String = state.get("name", address)
 
 	match action:
@@ -430,6 +305,7 @@ func _on_device_action_pressed() -> void:
 				_set_status("%s is already paired." % label)
 				_update_device_action_button()
 				return
+			_set_pending_operation(DeviceAction.PAIR, state.get("address", address))
 			_log_advanced("PAIR", "Attempting pair with %s (%s)" % [label, state.get("address", address)])
 			_log("Pairing requested: %s" % label)
 			Bluetooth.pair_device(state.get("address", address))
@@ -445,6 +321,7 @@ func _on_device_action_pressed() -> void:
 				_set_status("%s is already connected." % label)
 				_update_device_action_button()
 				return
+			_set_pending_operation(DeviceAction.CONNECT, state.get("address", address))
 			_log_advanced("CONNECT", "Attempting connect to %s (%s)" % [label, state.get("address", address)])
 			_log("Connect requested: %s" % label)
 			Bluetooth.connect_device(state.get("address", address))
@@ -455,6 +332,7 @@ func _on_device_action_pressed() -> void:
 				_set_status("%s is not connected." % label)
 				_update_device_action_button()
 				return
+			_set_pending_operation(DeviceAction.DISCONNECT, state.get("address", address))
 			_log_advanced("DISCONNECT", "Attempting disconnect from %s (%s)" % [label, state.get("address", address)])
 			_log("Disconnect requested: %s" % label)
 			Bluetooth.disconnect_device(state.get("address", address))
@@ -465,13 +343,14 @@ func _on_device_action_pressed() -> void:
 
 
 func _on_unpair_pressed() -> void:
-	var address := _get_selected_address()
+	_punch_ui(unpair_button)
+	var address: String = _presenter.get_selected_address()
 	if address.is_empty():
 		_set_status("Select a device to unpair.")
 		_log_advanced("ERROR", "Unpair blocked — no device selected.")
 		return
 
-	var state := _get_device_state(address)
+	var state: Dictionary = _presenter.get_device_state(address)
 	var label: String = state.get("name", address)
 
 	if not state.get("paired", false):
@@ -479,48 +358,55 @@ func _on_unpair_pressed() -> void:
 		_set_status("%s is not paired." % label)
 		return
 
-	if state.get("connected", false):
+	if state.get("connected", false) and not Bluetooth.can_unpair_while_connected():
 		_log_advanced("ERROR", "Unpair blocked — disconnect %s first." % label)
 		_set_status("Disconnect %s before unpairing." % label)
 		return
 
+	if state.get("connected", false):
+		_log_advanced("UNPAIR", "Device connected — backend will disconnect before unpairing %s." % label)
+
+	_set_pending_operation(DeviceAction.UNPAIR, state.get("address", address))
 	_log_advanced("UNPAIR", "Attempting unpair of %s (%s)" % [label, state.get("address", address)])
 	_log("Unpair requested: %s" % label)
 	Bluetooth.unpair_device(state.get("address", address))
 
 
 func _on_refresh_paired_pressed() -> void:
-	for device_info in Bluetooth.get_paired_devices():
-		_upsert_device_cache(device_info)
-	_refresh_device_list()
-	_set_status("Paired devices refreshed.")
-	_log("Paired devices refreshed.")
+	_set_status("Refreshing paired devices...")
+	_log("Paired devices refresh requested.")
+	Bluetooth.refresh_paired_devices()
 
 
 func _on_device_found(device_info: Dictionary) -> void:
-	var key := _cache_key_for(device_info)
-	var is_new := not _device_cache.has(key)
-	_upsert_device_cache(device_info)
-
-	var address: String = _device_address(device_info)
-	var name: String = _display_name_for(device_info)
-	var device_class: String = device_info.get("device_class", "unknown")
-	if is_new:
+	var before_count: int = _presenter.get_cached_count()
+	_presenter.handle_device_found(device_info)
+	if _is_scanning and _presenter.get_cached_count() > before_count:
 		_devices_found_this_scan += 1
+	var address: String = device_info.get("address", "")
+	var name: String = device_info.get("name", address)
+	if name.is_empty():
+		name = "Unnamed Device"
+	var device_class: String = device_info.get("device_class", "unknown")
 	_log("Found: %s (%s) [%s]" % [name, address, device_class])
-	_refresh_device_list()
+
+
+func _on_device_removed(address: String) -> void:
+	var label: String = _presenter.get_removal_log_label(address)
+	_presenter.handle_device_removed(address)
+	_log("Device removed: %s" % label)
+	_clear_pending_operation()
+	_update_device_action_button()
 
 
 func _on_scan_started() -> void:
 	_set_scan_ui_active(true)
-	_refresh_device_list()
-	_set_status("Scanning — discovery active (%d device(s) listed)" % device_list.item_count)
+	_set_status("Scanning — discovery active")
 	_log("Scan started. DeviceWatcher is running on the native backend.")
 
 
 func _on_scan_stopped() -> void:
 	_set_scan_ui_active(false)
-	_refresh_device_list()
 	_set_status("Scan stopped. Found %d device(s) this session." % _devices_found_this_scan)
 	_log("Scan stopped. Total discovered this scan: %d" % _devices_found_this_scan)
 
@@ -533,15 +419,17 @@ func _on_pairing_started(address: String) -> void:
 func _on_pairing_succeeded(address: String) -> void:
 	_set_status("Paired %s" % address)
 	_log("Pairing succeeded: %s" % address)
-	_update_cached_state(address, {"paired": true})
-	_sync_cache_from_bluetooth()
-	_refresh_device_list()
+	_presenter.handle_pairing_succeeded(address)
+	_clear_pending_operation()
+	_update_device_action_button()
 
 
 func _on_pairing_failed(address: String, error: String) -> void:
 	_set_status("Pairing failed.")
 	_log("Pairing failed for %s: %s" % [address, error])
 	_log_advanced("ERROR", "Pairing failed for %s: %s" % [address, error])
+	_clear_pending_operation()
+	_update_device_action_button()
 
 
 func _on_connection_changed(address: String, connected: bool, message: String = "") -> void:
@@ -556,13 +444,14 @@ func _on_connection_changed(address: String, connected: bool, message: String = 
 		_log("  %s" % message)
 		if message.to_lower().contains("error") or message.to_lower().contains("fail") or message.to_lower().contains("unable"):
 			_log_advanced("ERROR", "Connection note for %s: %s" % [address, message])
-	_update_cached_state(address, {"connected": connected})
-	_sync_cache_from_bluetooth()
-	_refresh_device_list()
+	_presenter.handle_connection_changed(address, connected)
+	_clear_pending_operation()
+	_update_device_action_button()
 
 
 func _on_error_occurred(operation: String, message: String) -> void:
 	_set_status("Error during %s" % operation)
 	_log("Error [%s]: %s" % [operation, message])
 	_log_advanced("ERROR", "[%s] %s" % [operation, message])
+	_clear_pending_operation()
 	_update_device_action_button()

@@ -10,6 +10,7 @@ enum class EventType {
 	SCAN_STARTED,
 	SCAN_STOPPED,
 	DEVICE_FOUND,
+	DEVICE_REMOVED,
 	PAIRING_STARTED,
 	PAIRING_SUCCEEDED,
 	PAIRING_FAILED,
@@ -21,6 +22,7 @@ enum class EventType {
 struct BluetoothEvent {
 	EventType type = EventType::ERROR_OCCURRED;
 	DeviceInfo device;
+	godot::Array devices;
 	godot::String address;
 	godot::String operation;
 	godot::String message;

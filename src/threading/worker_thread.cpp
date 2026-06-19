@@ -70,6 +70,7 @@ void WorkerThread::thread_main() {
 	while (running.load()) {
 		auto command = command_queue.wait_pop(100);
 		if (!command.has_value()) {
+			backend->poll();
 			continue;
 		}
 		process_command(*command);

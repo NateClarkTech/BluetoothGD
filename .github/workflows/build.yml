@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build extension
+        run: cmake --build build --parallel
+
+      - name: Build unit tests
+        run: cmake --build build --target bluetooth_manager_tests --parallel
+
+      - name: Run unit tests
+        run: ./build/tests/bluetooth_manager_tests
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluetooth_manager-linux-debug
+          path: demo/bin/libbluetooth_manager.*.so
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build extension
+        run: cmake --build build --config Debug --parallel
+
+      - name: Build unit tests
+        run: cmake --build build --config Debug --target bluetooth_manager_tests --parallel
+
+      - name: Run unit tests
+        run: ./build/tests/Debug/bluetooth_manager_tests.exe
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluetooth_manager-windows-debug
+          path: demo/bin/libbluetooth_manager.*.dll

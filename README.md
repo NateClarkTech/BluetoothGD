@@ -24,7 +24,8 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 ### Known limitations
 
 - **Windows HID disconnect:** `disconnect_device()` cannot force-disconnect Bluetooth HID gamepads. Power off the controller or remove the device in Windows Bluetooth settings for a full disconnect.
-- **Linux / macOS:** Backends compile but return "not implemented" errors at runtime (see [Supported platforms](#supported-platforms)).
+- **Linux HID disconnect:** `disconnect_device()` may not keep Bluetooth HID gamepads disconnected if they reconnect when powered on.
+- **macOS:** Backend compiles but returns "not implemented" errors at runtime (see [Supported platforms](#supported-platforms)).
 - **Mobile:** Not implemented yet; see platform table below.
 
 ## Supported platforms
@@ -32,12 +33,12 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 | Platform | Status | Backend | Notes |
 |----------|--------|---------|-------|
 | **Windows 10/11** (x86_64) | **Fully supported** | WinRT | Primary development target. Tested with Godot 4.7. |
-| **Linux** (x86_64) | Stub | BlueZ / D-Bus | Milestone 2. Builds link `dbus-1`; operations emit not-implemented errors. |
+| **Linux** (x86_64) | **Supported** | BlueZ / D-Bus | Requires `bluetoothd`, powered adapter, and BlueZ D-Bus permissions (`bluetooth` group or polkit). |
 | **macOS** (universal) | Stub | IOBluetooth | Milestone 3. Framework linked; operations emit not-implemented errors. |
 | **Android** | Planned | Android Bluetooth API | Milestone 4. Requires runtime permissions (`BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN`, location on older API levels) and export plugin integration. Classic pairing availability varies by device and Android version. |
 | **iOS** | Planned | Core Bluetooth / External Accessory | Milestone 5. iOS restricts third-party Classic Bluetooth access; gamepad pairing may require MFi / system UI flows. BLE-centric workflows are more feasible than full Classic pairing. |
 
-**Currently fully working:** Windows desktop only.
+**Currently fully working:** Windows and Linux desktop.
 
 Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at runtime to gate features per platform.
 
@@ -53,9 +54,11 @@ Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at 
 - Visual Studio 2019 or later with the **Desktop development with C++** workload
 - **Windows 10/11 SDK** (WinRT / `windowsapp`)
 
-### Linux build tools (stub backend)
+### Linux build tools
 
-- `libdbus-1-dev` (for future BlueZ integration)
+- `libdbus-1-dev`
+- `bluez` (runtime — `bluetoothd` must be running)
+- User in the `bluetooth` group (or equivalent polkit rights) for pair/connect operations
 
 ### macOS build tools (stub backend)
 
@@ -107,7 +110,7 @@ BluetoothGD/
 │   ├── threading/          # Worker thread + queues
 │   └── platform/           # Per-OS backends
 │       ├── windows/        # WinRT (fully implemented)
-│       ├── linux/          # BlueZ stub
+│       ├── linux/          # BlueZ / D-Bus
 │       └── macos/          # IOBluetooth stub
 ├── demo/                   # Godot demo project
 │   ├── bluetooth_manager.gdextension
@@ -162,12 +165,15 @@ func _on_pair(address: String) -> void:
 | `get_discovered_devices() -> Array[Dictionary]` | Cached devices from the current session |
 | `pair_device(address: String)` | Pair (bond) with a device |
 | `unpair_device(address: String)` | Remove pairing |
+| `refresh_paired_devices()` | Silently sync paired devices from the native backend |
 | `get_paired_devices() -> Array[Dictionary]` | Known paired devices |
 | `is_paired(address: String) -> bool` | Whether a device is paired |
 | `connect_device(address: String)` | Request connection |
 | `disconnect_device(address: String)` | Request disconnection (best-effort on Windows HID) |
 | `is_connected(address: String) -> bool` | Whether a device is connected |
 | `normalize_address(address: String) -> String` | Normalize MAC formatting (`AA:BB:CC:DD:EE:FF`) |
+| `is_valid_bluetooth_address(address: String) -> bool` | Whether a string is a 6-byte MAC address |
+| `can_unpair_while_connected() -> bool` | Platform policy for unpairing connected devices (`true` on Linux) |
 | `is_bluetooth_available() -> bool` | Whether the native backend initialized |
 | `get_platform_name() -> String` | `"windows"`, `"linux"`, `"macos"`, or `"unknown"` |
 
@@ -176,6 +182,9 @@ func _on_pair(address: String) -> void:
 | Signal | Payload |
 |--------|---------|
 | `device_found` | `device_info: Dictionary` |
+| `device_removed` | `address: String` |
+| `devices_refreshed` | — (batch sync after `refresh_paired_devices`) |
+| `bluetooth_ready` | — (emitted once after init + first paired-device sync) |
 | `scan_started` | — |
 | `scan_stopped` | — |
 | `pairing_started` | `address: String` |
@@ -208,7 +217,7 @@ The reference scene (`demo/scenes/controller_pairing.tscn`) includes:
 ## Roadmap
 
 1. **M1 — Windows (WinRT)** — done
-2. **M2 — Linux (BlueZ via D-Bus)**
+2. **M2 — Linux (BlueZ via D-Bus)** — done
 3. **M3 — macOS (IOBluetooth)**
 4. **M4 — Android** — permissions, JNI/NDK bridge, export templates
 5. **M5 — iOS** — evaluate BLE vs Classic constraints; likely system-assisted pairing flows

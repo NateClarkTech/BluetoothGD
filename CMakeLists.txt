@@ -11,6 +11,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(DBUS REQUIRED dbus-1)
+endif()
+
 add_subdirectory(godot-cpp)
 
 set(TARGET_NAME bluetooth_manager)
@@ -44,6 +49,10 @@ elseif(APPLE)
     )
 elseif(UNIX)
     list(APPEND BLUETOOTH_SOURCES
+        src/platform/linux/bluez_agent.cpp
+        src/platform/linux/bluez_agent.h
+        src/platform/linux/bluez_dbus.cpp
+        src/platform/linux/bluez_dbus.h
         src/platform/linux/linux_backend.cpp
         src/platform/linux/linux_backend.h
     )
@@ -91,5 +100,12 @@ elseif(APPLE)
         "-framework Foundation"
     )
 elseif(UNIX)
-    target_link_libraries(${TARGET_NAME} PRIVATE dbus-1)
+    target_include_directories(${TARGET_NAME} PRIVATE ${DBUS_INCLUDE_DIRS})
+    target_link_libraries(${TARGET_NAME} PRIVATE ${DBUS_LIBRARIES})
 endif()
+
+add_executable(bluetooth_manager_tests tests/test_device_info.cpp)
+set_target_properties(bluetooth_manager_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests"
+    CXX_STANDARD 17
+)

@@ -21,6 +21,7 @@ public:
 
 	void pair_device(const String &p_address);
 	void unpair_device(const String &p_address);
+	void refresh_paired_devices();
 	Array get_paired_devices() const;
 	bool is_paired(const String &p_address) const;
 
@@ -29,6 +30,8 @@ public:
 	bool is_connected(const String &p_address) const;
 
 	String normalize_address(const String &p_address) const;
+	bool is_valid_bluetooth_address(const String &p_address) const;
+	bool can_unpair_while_connected() const;
 	bool is_bluetooth_available() const;
 	String get_platform_name() const;
 
@@ -43,6 +46,10 @@ private:
 	void enqueue_command(bluetooth::CommandType p_type, const String &p_address = String());
 	void handle_event(const bluetooth::BluetoothEvent &p_event);
 	void upsert_device(const bluetooth::DeviceInfo &p_device);
+	void remove_device_for_address(const String &p_address);
+	void sync_devices_from_snapshot(const Array &p_devices);
+	void maybe_emit_bluetooth_ready();
+	String resolve_command_address(const String &p_address) const;
 	String canonical_device_key(const bluetooth::DeviceInfo &p_device) const;
 	void update_devices_for_address(const String &p_address, const std::function<void(bluetooth::DeviceInfo &)> &p_mutator);
 	void emit_device_updates_for_address(const String &p_address);
@@ -50,6 +57,7 @@ private:
 
 	bluetooth::WorkerThread worker;
 	bool backend_available = false;
+	bool bluetooth_ready_emitted = false;
 	HashMap<String, bluetooth::DeviceInfo> discovered_devices;
 	HashMap<String, bluetooth::DeviceInfo> paired_devices;
 };

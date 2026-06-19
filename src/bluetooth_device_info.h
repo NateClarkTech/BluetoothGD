@@ -26,6 +26,32 @@ struct DeviceInfo {
 		dict[godot::String("device_id")] = device_id;
 		return dict;
 	}
+
+	static DeviceInfo from_dictionary(const godot::Dictionary &p_dict) {
+		DeviceInfo info;
+		if (p_dict.has("address")) {
+			info.address = p_dict["address"];
+		}
+		if (p_dict.has("name")) {
+			info.name = p_dict["name"];
+		}
+		if (p_dict.has("paired")) {
+			info.paired = p_dict["paired"];
+		}
+		if (p_dict.has("connected")) {
+			info.connected = p_dict["connected"];
+		}
+		if (p_dict.has("trusted")) {
+			info.trusted = p_dict["trusted"];
+		}
+		if (p_dict.has("device_class")) {
+			info.device_class = p_dict["device_class"];
+		}
+		if (p_dict.has("device_id")) {
+			info.device_id = p_dict["device_id"];
+		}
+		return info;
+	}
 };
 
 inline godot::String normalize_address(const godot::String &p_address) {
@@ -61,6 +87,26 @@ inline bool addresses_match(const godot::String &p_a, const godot::String &p_b) 
 		return true;
 	}
 	return false;
+}
+
+inline bool is_mac_address_name(const godot::String &p_name, const godot::String &p_address = "") {
+	const godot::String trimmed = p_name.strip_edges();
+	if (trimmed.is_empty()) {
+		return false;
+	}
+	if (is_valid_bluetooth_address(trimmed)) {
+		return true;
+	}
+	if (!p_address.is_empty() && addresses_match(trimmed, p_address)) {
+		return true;
+	}
+	return false;
+}
+
+inline void clear_unhelpful_device_name(DeviceInfo &p_info) {
+	if (is_mac_address_name(p_info.name, p_info.address)) {
+		p_info.name = "";
+	}
 }
 
 inline godot::String infer_device_class(const godot::String &p_name) {
