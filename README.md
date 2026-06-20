@@ -32,7 +32,7 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 
 | Platform | Status | Backend | Notes |
 |----------|--------|---------|-------|
-| **Windows 10/11** (x86_64) | **Fully supported** | WinRT | Primary development target. Tested with Godot 4.7. |
+| **Windows 10/11** (x86_64) | **Supported** | WinRT | Primary development target. Tested with Godot 4.7. |
 | **Linux** (x86_64) | **Supported** | BlueZ / D-Bus | Requires `bluetoothd`, powered adapter, and BlueZ D-Bus permissions (`bluetooth` group or polkit). |
 | **macOS** (universal) | Stub | IOBluetooth | Milestone 3. Framework linked; operations emit not-implemented errors. |
 | **Android** | Planned | Android Bluetooth API | Milestone 4. Requires runtime permissions (`BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN`, location on older API levels) and export plugin integration. Classic pairing availability varies by device and Android version. |
