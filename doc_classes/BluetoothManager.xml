@@ -167,7 +167,7 @@
 		<method name="can_unpair_while_connected">
 			<return type="bool" />
 			<description>
-				Returns [code]true[/code] if the current platform allows unpairing while a device is still connected. [code]false[/code] on Windows; [code]true[/code] on Linux.
+				Returns [code]true[/code] if the current platform allows unpairing while a device is still connected. [code]true[/code] on Windows and Linux; [code]false[/code] on macOS and other stub backends.
 			</description>
 		</method>
 		<method name="is_bluetooth_available">
@@ -191,7 +191,7 @@
 		<method name="get_capabilities">
 			<return type="Dictionary" />
 			<description>
-				Returns platform capability flags, including [code]platform[/code], [code]implemented[/code], [code]supports_ble[/code], [code]supports_device_id[/code], [code]can_disconnect_hid[/code], [code]can_unpair_while_connected[/code], and [code]needs_pin_ui[/code].
+				Returns platform capability flags, including [code]platform[/code], [code]implemented[/code], [code]supports_ble[/code], [code]supports_device_id[/code], [code]supports_rssi[/code] (Linux), [code]can_disconnect_hid[/code], [code]can_unpair_while_connected[/code], and [code]needs_pin_ui[/code].
 			</description>
 		</method>
 		<method name="get_error_code_name">
@@ -200,7 +200,7 @@
 				Numeric error code from [signal pairing_failed] or [signal error_occurred].
 			</param>
 			<description>
-				Converts an error code to a stable string: [code]device_not_found[/code], [code]radio_off[/code], [code]pin_required[/code], [code]pairing_rejected[/code], [code]permission_denied[/code], [code]operation_timeout[/code], [code]invalid_address[/code], [code]already_in_progress[/code], or [code]unknown[/code].
+				Converts an error code to a stable string: [code]none[/code], [code]device_not_found[/code], [code]radio_off[/code], [code]not_supported[/code], [code]pin_required[/code], [code]pairing_rejected[/code], [code]permission_denied[/code], [code]operation_timeout[/code], [code]invalid_address[/code], [code]already_in_progress[/code], or [code]unknown[/code].
 			</description>
 		</method>
 	</methods>

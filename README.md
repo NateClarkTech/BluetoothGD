@@ -114,8 +114,11 @@ BluetoothGD/
 │       └── macos/          # IOBluetooth stub
 ├── demo/                   # Godot demo project
 │   ├── bluetooth_manager.gdextension
-│   ├── bin/                # Compiled native libraries
+│   ├── bin/                # Compiled native libraries (gitignored)
 │   └── scenes/             # Demo UI + autoload scene
+├── doc_classes/            # Editor API docs (BluetoothManager.xml)
+├── tests/                  # Native unit tests (device info helpers)
+├── cmake/                  # Build helpers (doc generation)
 ├── godot-cpp/              # Godot C++ bindings (submodule, 4.4 branch)
 └── CMakeLists.txt
 ```
@@ -139,19 +142,31 @@ Add a `BluetoothManager` node to your scene tree, or autoload it (as the demo do
 
 ```gdscript
 func _ready() -> void:
+    Bluetooth.bluetooth_ready.connect(_on_bluetooth_ready)
     Bluetooth.device_found.connect(_on_device_found)
     Bluetooth.scan_started.connect(_on_scan_started)
     Bluetooth.scan_stopped.connect(_on_scan_stopped)
     Bluetooth.pairing_succeeded.connect(_on_pairing_succeeded)
     Bluetooth.pairing_failed.connect(_on_pairing_failed)
+    Bluetooth.pairing_pin_requested.connect(_on_pairing_pin_requested)
     Bluetooth.connection_changed.connect(_on_connection_changed)
     Bluetooth.error_occurred.connect(_on_error_occurred)
 
+func _on_bluetooth_ready() -> void:
+    # Backend initialized and first paired-device sync completed.
+    pass
+
 func _on_start_scan() -> void:
-    Bluetooth.start_scan()
+    Bluetooth.start_scan({"named_only": false, "gamepads_only": false})
 
 func _on_pair(address: String) -> void:
     Bluetooth.pair_device(address)
+
+func _on_pairing_pin_requested(address: String) -> void:
+    Bluetooth.confirm_pairing("0000")  # or reject_pairing() / cancel_pairing()
+
+func _on_pairing_failed(address: String, error: String, error_code: int) -> void:
+    print(Bluetooth.get_error_code_name(error_code), error)
 ```
 
 ### API reference
@@ -160,50 +175,95 @@ func _on_pair(address: String) -> void:
 
 | Method | Description |
 |--------|-------------|
-| `start_scan()` | Begin discovering nearby Bluetooth devices |
+| `start_scan(options: Dictionary = {})` | Begin discovering nearby Bluetooth devices (see [scan options](#scan-options)) |
 | `stop_scan()` | Stop an active scan |
-| `get_discovered_devices() -> Array[Dictionary]` | Cached devices from the current session |
-| `pair_device(address: String)` | Pair (bond) with a device |
+| `get_discovered_devices() -> Array` | Cached devices from the current session |
+| `pair_device(address: String)` | Pair (bond) with a device by MAC or platform identifier |
+| `pair_device_by_id(device_id: String)` | Pair using the platform `device_id` (useful on Windows before a MAC is resolved) |
 | `unpair_device(address: String)` | Remove pairing |
-| `refresh_paired_devices()` | Silently sync paired devices from the native backend |
-| `get_paired_devices() -> Array[Dictionary]` | Known paired devices |
+| `refresh_paired_devices()` | Re-query paired devices from the native backend |
+| `get_paired_devices() -> Array` | Known paired devices |
 | `is_paired(address: String) -> bool` | Whether a device is paired |
 | `connect_device(address: String)` | Request connection |
 | `disconnect_device(address: String)` | Request disconnection (best-effort on Windows HID) |
 | `is_connected(address: String) -> bool` | Whether a device is connected |
+| `confirm_pairing(pin: String = "")` | Accept an interactive pairing request (PIN when requested) |
+| `reject_pairing()` | Reject the current interactive pairing request |
+| `cancel_pairing()` | Cancel the in-progress pairing ceremony |
 | `normalize_address(address: String) -> String` | Normalize MAC formatting (`AA:BB:CC:DD:EE:FF`) |
 | `is_valid_bluetooth_address(address: String) -> bool` | Whether a string is a 6-byte MAC address |
-| `can_unpair_while_connected() -> bool` | Platform policy for unpairing connected devices (`true` on Linux) |
+| `can_unpair_while_connected() -> bool` | Platform policy for unpairing connected devices (`true` on Windows and Linux) |
 | `is_bluetooth_available() -> bool` | Whether the native backend initialized |
+| `is_radio_on() -> bool` | Whether the Bluetooth radio is powered on |
 | `get_platform_name() -> String` | `"windows"`, `"linux"`, `"macos"`, or `"unknown"` |
+| `get_capabilities() -> Dictionary` | Platform capability flags (see [capabilities](#capabilities)) |
+| `get_error_code_name(error_code: int) -> String` | Stable name for signal error codes (see [error codes](#error-codes)) |
 
 #### Signals
 
 | Signal | Payload |
 |--------|---------|
-| `device_found` | `device_info: Dictionary` |
-| `device_removed` | `address: String` |
-| `devices_refreshed` | — (batch sync after `refresh_paired_devices`) |
 | `bluetooth_ready` | — (emitted once after init + first paired-device sync) |
 | `scan_started` | — |
 | `scan_stopped` | — |
+| `device_found` | `device_info: Dictionary` |
+| `device_removed` | `address: String` |
+| `devices_refreshed` | — (batch sync after `refresh_paired_devices`) |
 | `pairing_started` | `address: String` |
 | `pairing_succeeded` | `address: String` |
-| `pairing_failed` | `address: String`, `error: String` |
+| `pairing_failed` | `address: String`, `error: String`, `error_code: int` |
+| `pairing_confirmation_requested` | `address: String`, `kind: String` |
+| `pairing_pin_requested` | `address: String` |
+| `pairing_display_pin` | `address: String`, `pin: String` |
 | `connection_changed` | `address: String`, `connected: bool`, `message: String` |
-| `error_occurred` | `operation: String`, `message: String` |
+| `error_occurred` | `operation: String`, `message: String`, `error_code: int` |
 
 #### Device dictionary fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `address` | `String` | MAC address when available |
-| `name` | `String` | Friendly name |
+| `address` | `String` | MAC address when known; otherwise a platform identifier |
+| `name` | `String` | Friendly name (may be empty for unnamed discovery entries) |
 | `paired` | `bool` | Paired/bonded state |
 | `connected` | `bool` | Connection state |
-| `trusted` | `bool` | Trusted flag (platform-dependent) |
-| `device_class` | `String` | Inferred class (e.g. `"gamepad"`) |
-| `device_id` | `String` | Platform device path / ID (Windows AEP) |
+| `trusted` | `bool` | Trusted flag (primarily Linux) |
+| `device_class` | `String` | Inferred class (e.g. `"gamepad"`, `"unknown"`) |
+| `device_id` | `String` | Platform device path / ID (Windows AEP, Linux D-Bus object path) |
+| `rssi` | `int` | Signal strength in dBm when available (Linux scan) |
+
+#### Scan options
+
+Optional `options` dictionary for `start_scan()`:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `named_only` | `bool` | `false` | Omit devices without a friendly name from backend scan results |
+| `gamepads_only` | `bool` | `false` | Only report gamepad-class devices |
+| `min_rssi` | `int` | `-127` | Minimum RSSI threshold (Linux) |
+| `timeout_seconds` | `int` | `0` | Scan timeout hint in seconds |
+
+The demo applies its **Named devices only** filter in the UI layer (via `DeviceListPresenter`), independent of these backend options.
+
+#### Capabilities
+
+`get_capabilities()` returns a dictionary of platform flags. Common keys:
+
+| Key | Description |
+|-----|-------------|
+| `platform` | Same as `get_platform_name()` |
+| `implemented` | Whether the backend is fully implemented |
+| `supports_ble` | BLE discovery support |
+| `supports_device_id` | `pair_device_by_id()` and `device_id` fields are usable |
+| `supports_rssi` | RSSI available during scan (Linux) |
+| `can_disconnect_hid` | Whether HID gamepads can be force-disconnected (`false` on Windows/Linux) |
+| `can_unpair_while_connected` | Whether unpair is allowed while connected |
+| `needs_pin_ui` | Whether interactive PIN/confirmation UI may be required |
+
+#### Error codes
+
+Use `get_error_code_name(error_code)` with `pairing_failed` and `error_occurred`. Known values:
+
+`none`, `device_not_found`, `radio_off`, `not_supported`, `pin_required`, `pairing_rejected`, `permission_denied`, `operation_timeout`, `invalid_address`, `already_in_progress`, `unknown`
 
 ## Demo UI
 
@@ -224,4 +284,4 @@ The reference scene (`demo/scenes/controller_pairing.tscn`) includes:
 
 ## License
 
-License not yet specified. Add a `LICENSE` file before distribution.
+[MIT License](LICENSE.md) — Copyright (c) 2026 Nate Clark.
