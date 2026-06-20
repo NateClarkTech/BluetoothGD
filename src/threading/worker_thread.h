@@ -21,6 +21,8 @@ public:
 
 	void enqueue_command(const BluetoothCommand &p_command);
 	void submit_pairing_response(const PairingUserResponse &p_response);
+	godot::Dictionary get_capabilities() const;
+	bool is_radio_on() const;
 	ThreadSafeQueue<BluetoothEvent> &get_event_queue();
 
 private:

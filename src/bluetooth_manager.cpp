@@ -161,6 +161,8 @@ void BluetoothManager::handle_event(const bluetooth::BluetoothEvent &p_event) {
 			emit_signal("connection_changed", p_event.address, p_event.connected, p_event.message);
 			break;
 		case bluetooth::EventType::BACKEND_INITIALIZED:
+			cached_capabilities = worker.get_capabilities();
+			radio_on = worker.is_radio_on();
 			maybe_emit_bluetooth_ready();
 			break;
 		case bluetooth::EventType::PAIRED_DEVICES_UPDATED:
@@ -397,6 +399,9 @@ bool BluetoothManager::is_valid_bluetooth_address(const String &p_address) const
 }
 
 bool BluetoothManager::can_unpair_while_connected() const {
+	if (!cached_capabilities.is_empty() && cached_capabilities.has("can_unpair_while_connected")) {
+		return cached_capabilities["can_unpair_while_connected"];
+	}
 #if defined(_WIN32) || defined(__linux__)
 	return true;
 #else
@@ -436,30 +441,33 @@ Dictionary BluetoothManager::get_capabilities() const {
 	if (!cached_capabilities.is_empty()) {
 		return cached_capabilities;
 	}
-	Dictionary caps;
-	caps["platform"] = get_platform_name();
+
+	Dictionary caps = worker.get_capabilities();
+	if (caps.is_empty()) {
+		caps["platform"] = get_platform_name();
 #if defined(_WIN32)
-	caps["implemented"] = true;
-	caps["can_disconnect_hid"] = false;
-	caps["can_unpair_while_connected"] = true;
-	caps["needs_pin_ui"] = true;
-	caps["supports_ble"] = true;
-	caps["supports_device_id"] = true;
+		caps["implemented"] = true;
+		caps["can_disconnect_hid"] = false;
+		caps["can_unpair_while_connected"] = true;
+		caps["needs_pin_ui"] = true;
+		caps["supports_ble"] = true;
+		caps["supports_device_id"] = true;
 #elif defined(__linux__)
-	caps["implemented"] = true;
-	caps["can_disconnect_hid"] = false;
-	caps["can_unpair_while_connected"] = true;
-	caps["needs_pin_ui"] = true;
-	caps["supports_ble"] = true;
-	caps["supports_rssi"] = true;
-	caps["supports_device_id"] = true;
+		caps["implemented"] = true;
+		caps["can_disconnect_hid"] = false;
+		caps["can_unpair_while_connected"] = true;
+		caps["needs_pin_ui"] = true;
+		caps["supports_ble"] = true;
+		caps["supports_rssi"] = true;
+		caps["supports_device_id"] = true;
 #else
-	caps["implemented"] = false;
-	caps["can_disconnect_hid"] = false;
-	caps["can_unpair_while_connected"] = false;
-	caps["needs_pin_ui"] = false;
-	caps["supports_ble"] = false;
+		caps["implemented"] = false;
+		caps["can_disconnect_hid"] = false;
+		caps["can_unpair_while_connected"] = false;
+		caps["needs_pin_ui"] = false;
+		caps["supports_ble"] = false;
 #endif
+	}
 	return caps;
 }
 

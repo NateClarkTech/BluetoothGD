@@ -928,6 +928,13 @@ bool LinuxBackend::is_radio_on() const {
 godot::Dictionary LinuxBackend::get_capabilities() const {
 	godot::Dictionary caps;
 	caps["platform"] = "linux";
+	caps["implemented"] = true;
+	caps["supports_ble"] = true;
+	caps["supports_device_id"] = true;
+	caps["supports_rssi"] = true;
+	caps["can_disconnect_hid"] = false;
+	caps["can_unpair_while_connected"] = true;
+	caps["needs_pin_ui"] = true;
 	caps["pair_by_address"] = true;
 	caps["pair_by_device_id"] = true;
 	caps["interactive_pairing"] = true;
@@ -935,7 +942,6 @@ godot::Dictionary LinuxBackend::get_capabilities() const {
 	caps["scan_gamepads_only_filter"] = true;
 	caps["scan_min_rssi_filter"] = true;
 	caps["scan_timeout"] = true;
-	caps["can_unpair_while_connected"] = true;
 	caps["radio_control"] = true;
 	return caps;
 }

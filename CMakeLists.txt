@@ -64,13 +64,12 @@ file(GLOB BLUETOOTH_DOC_XML CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/doc_c
 if(BLUETOOTH_DOC_XML)
     set(BLUETOOTH_DOC_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/gen/doc_source.cpp")
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gen")
-    add_custom_target(
-        bluetooth_doc_source
+    add_custom_command(
+        OUTPUT "${BLUETOOTH_DOC_SOURCE}"
         COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_extension_docs.py"
             "${BLUETOOTH_DOC_SOURCE}"
             ${BLUETOOTH_DOC_XML}
-        BYPRODUCTS "${BLUETOOTH_DOC_SOURCE}"
         DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_extension_docs.py"
             "${godot-cpp_SOURCE_DIR}/doc_source_generator.py"
@@ -78,6 +77,7 @@ if(BLUETOOTH_DOC_XML)
         COMMENT "Generating BluetoothManager editor documentation"
         VERBATIM
     )
+    add_custom_target(bluetooth_doc_source DEPENDS "${BLUETOOTH_DOC_SOURCE}")
     target_sources(${TARGET_NAME} PRIVATE "${BLUETOOTH_DOC_SOURCE}")
     add_dependencies(${TARGET_NAME} bluetooth_doc_source)
     set_source_files_properties("${BLUETOOTH_DOC_SOURCE}" PROPERTIES GENERATED TRUE)

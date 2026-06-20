@@ -46,6 +46,20 @@ void WorkerThread::submit_pairing_response(const PairingUserResponse &p_response
 	}
 }
 
+godot::Dictionary WorkerThread::get_capabilities() const {
+	if (backend) {
+		return backend->get_capabilities();
+	}
+	return godot::Dictionary();
+}
+
+bool WorkerThread::is_radio_on() const {
+	if (backend) {
+		return backend->is_radio_on();
+	}
+	return true;
+}
+
 ThreadSafeQueue<BluetoothEvent> &WorkerThread::get_event_queue() {
 	return event_queue;
 }

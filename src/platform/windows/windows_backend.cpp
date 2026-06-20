@@ -1281,16 +1281,22 @@ bool WindowsBackend::is_radio_on() const {
 godot::Dictionary WindowsBackend::get_capabilities() const {
 	godot::Dictionary caps;
 	caps["platform"] = "windows";
-	caps["classic_bluetooth"] = true;
-	caps["ble_discovery"] = true;
-	caps["hid_gamepad_detection"] = true;
-	caps["interactive_pairing"] = true;
+	caps["implemented"] = true;
+	caps["supports_ble"] = true;
+	caps["supports_device_id"] = true;
+	caps["supports_rssi"] = false;
+	caps["can_disconnect_hid"] = false;
+	caps["can_unpair_while_connected"] = true;
+	caps["needs_pin_ui"] = true;
+	caps["pair_by_address"] = true;
 	caps["pair_by_device_id"] = true;
+	caps["interactive_pairing"] = true;
+	caps["hid_gamepad_detection"] = true;
+	caps["scan_named_only_filter"] = true;
+	caps["scan_gamepads_only_filter"] = true;
+	caps["scan_min_rssi_filter"] = false;
+	caps["scan_timeout"] = false;
 	caps["radio_state_query"] = true;
-	caps["force_disconnect_hid"] = false;
-	caps["unpair_while_connected"] = true;
-	caps["scan_filter_named_only"] = true;
-	caps["scan_filter_gamepads_only"] = true;
 	return caps;
 }
 
