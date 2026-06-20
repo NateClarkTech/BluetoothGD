@@ -160,6 +160,9 @@ void BluetoothManager::handle_event(const bluetooth::BluetoothEvent &p_event) {
 			emit_device_updates_for_address(p_event.address);
 			emit_signal("connection_changed", p_event.address, p_event.connected, p_event.message);
 			break;
+		case bluetooth::EventType::BACKEND_INITIALIZED:
+			maybe_emit_bluetooth_ready();
+			break;
 		case bluetooth::EventType::PAIRED_DEVICES_UPDATED:
 			sync_devices_from_snapshot(p_event.devices);
 			emit_signal("devices_refreshed");
@@ -216,14 +219,14 @@ void BluetoothManager::remove_device_for_address(const String &p_address) {
 }
 
 void BluetoothManager::sync_devices_from_snapshot(const Array &p_devices) {
-	discovered_devices.clear();
-	paired_devices.clear();
 	for (int i = 0; i < p_devices.size(); i++) {
 		const Variant entry = p_devices[i];
 		if (entry.get_type() != Variant::DICTIONARY) {
 			continue;
 		}
-		upsert_device(bluetooth::DeviceInfo::from_dictionary(entry));
+		const bluetooth::DeviceInfo info = bluetooth::DeviceInfo::from_dictionary(entry);
+		upsert_device(info);
+		emit_signal("device_found", info.to_dictionary());
 	}
 }
 
@@ -232,7 +235,8 @@ void BluetoothManager::update_devices_for_address(const String &p_address,
 	PackedStringArray keys_to_remove;
 	for (const KeyValue<String, bluetooth::DeviceInfo> &item : discovered_devices) {
 		if (!bluetooth::addresses_match(item.value.address, p_address) &&
-				!bluetooth::addresses_match(item.key, p_address)) {
+				!bluetooth::addresses_match(item.key, p_address) &&
+				item.value.device_id != p_address) {
 			continue;
 		}
 		bluetooth::DeviceInfo info = item.value;
@@ -260,7 +264,8 @@ void BluetoothManager::update_devices_for_address(const String &p_address,
 void BluetoothManager::emit_device_updates_for_address(const String &p_address) {
 	for (const KeyValue<String, bluetooth::DeviceInfo> &item : discovered_devices) {
 		if (bluetooth::addresses_match(item.value.address, p_address) ||
-				bluetooth::addresses_match(item.key, p_address)) {
+				bluetooth::addresses_match(item.key, p_address) ||
+				item.value.device_id == p_address) {
 			emit_signal("device_found", item.value.to_dictionary());
 		}
 	}
@@ -288,8 +293,15 @@ void BluetoothManager::upsert_device(const bluetooth::DeviceInfo &p_device) {
 		}
 	}
 	for (int i = 0; i < stale_keys.size(); i++) {
+		if (discovered_devices.has(stale_keys[i])) {
+			bluetooth::merge_device_endpoints(info, discovered_devices[stale_keys[i]]);
+		}
 		discovered_devices.erase(stale_keys[i]);
 		paired_devices.erase(stale_keys[i]);
+	}
+
+	if (discovered_devices.has(key)) {
+		bluetooth::merge_device_identity(info, discovered_devices[key]);
 	}
 
 	discovered_devices[key] = info;
@@ -385,9 +397,7 @@ bool BluetoothManager::is_valid_bluetooth_address(const String &p_address) const
 }
 
 bool BluetoothManager::can_unpair_while_connected() const {
-#if defined(_WIN32)
-	return false;
-#elif defined(__linux__)
+#if defined(_WIN32) || defined(__linux__)
 	return true;
 #else
 	return false;
@@ -431,7 +441,7 @@ Dictionary BluetoothManager::get_capabilities() const {
 #if defined(_WIN32)
 	caps["implemented"] = true;
 	caps["can_disconnect_hid"] = false;
-	caps["can_unpair_while_connected"] = false;
+	caps["can_unpair_while_connected"] = true;
 	caps["needs_pin_ui"] = true;
 	caps["supports_ble"] = true;
 	caps["supports_device_id"] = true;

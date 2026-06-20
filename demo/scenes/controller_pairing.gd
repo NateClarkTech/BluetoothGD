@@ -28,6 +28,11 @@ var _scan_tween: Tween = null
 var _dot_timer: float = 0.0
 var _dot_count: int = 0
 var _bluetooth_ready: bool = false
+var _init_wait_sec: float = 0.0
+var _scan_start_wait_sec: float = 0.0
+var _scan_start_pending: bool = false
+const INIT_READY_TIMEOUT_SEC := 8.0
+const SCAN_START_TIMEOUT_SEC := 6.0
 var _pending_operation: DeviceAction = DeviceAction.NONE
 var _pending_address: String = ""
 var _presenter: Node
@@ -41,12 +46,23 @@ func _ready() -> void:
 	_set_advanced_visible(false)
 	_set_status("Initializing Bluetooth...")
 	_log("Bluetooth platform: %s" % Bluetooth.get_platform_name())
-	_log("Bluetooth available: %s" % str(Bluetooth.is_bluetooth_available()))
-	_log_advanced("INFO", "Advanced log started — tracks connect/disconnect attempts and errors.")
+	_log("Waiting for Bluetooth backend to initialize...")
+	_log_advanced_system_info()
 	_update_device_action_button()
+	call_deferred("_check_bluetooth_startup_state")
 
 
 func _process(delta: float) -> void:
+	if not _bluetooth_ready:
+		_init_wait_sec += delta
+		if _init_wait_sec >= INIT_READY_TIMEOUT_SEC:
+			_report_bluetooth_init_stalled()
+
+	if _scan_start_pending and not _is_scanning:
+		_scan_start_wait_sec += delta
+		if _scan_start_wait_sec >= SCAN_START_TIMEOUT_SEC:
+			_report_scan_start_stalled()
+
 	if not _is_scanning:
 		return
 
@@ -85,15 +101,47 @@ func _connect_signals() -> void:
 
 func _on_bluetooth_ready() -> void:
 	_bluetooth_ready = true
+	_init_wait_sec = 0.0
 	_presenter.rebuild_from_bluetooth()
 	_set_scan_ui_active(_is_scanning)
 	_set_status("Ready")
 	_log("Bluetooth backend ready.")
+	_log("Bluetooth available: %s" % str(Bluetooth.is_bluetooth_available()))
+	_log_advanced_bluetooth_state()
+
+
+func _check_bluetooth_startup_state() -> void:
+	if _bluetooth_ready:
+		return
+	if not Bluetooth.is_bluetooth_available():
+		_set_status("Bluetooth unavailable")
+		_log("Scan disabled: Bluetooth backend failed to start. Check Advanced Log for WinRT or driver errors.")
+		_log_advanced("ERROR", "Bluetooth.is_bluetooth_available() returned false during startup.")
+		return
+	_log("Bluetooth worker started; loading paired devices in the background...")
+
+
+func _report_bluetooth_init_stalled() -> void:
+	if _bluetooth_ready:
+		return
+	_init_wait_sec = 0.0
+	_set_status("Bluetooth init stalled")
+	var reason := "Scan disabled: Bluetooth backend did not become ready within %.0f seconds." % INIT_READY_TIMEOUT_SEC
+	if not Bluetooth.is_bluetooth_available():
+		reason += " Backend reported unavailable (initialize may have failed)."
+	else:
+		reason += " Paired-device refresh may still be running; try Refresh Paired or restart the demo."
+	_log(reason)
+	_log_advanced("ERROR", reason)
 
 
 func _on_devices_refreshed() -> void:
+	_presenter.rebuild_from_bluetooth()
+	var paired_count: int = Bluetooth.get_paired_devices().size()
+	var discovered_count: int = Bluetooth.get_discovered_devices().size()
+	_log("Device list updated (%d paired, %d discovered)." % [paired_count, discovered_count])
 	if _bluetooth_ready:
-		_presenter.rebuild_from_bluetooth()
+		_update_device_action_button()
 
 
 func _on_presenter_selection_changed(_address: String) -> void:
@@ -118,6 +166,58 @@ func _log_advanced(category: String, message: String) -> void:
 	advanced_log.text += "[%s] [%s] %s\n" % [stamp, category, message]
 	_trim_log(advanced_log)
 	call_deferred("_scroll_text_edit_to_end", advanced_log)
+
+
+func _log_advanced_system_info() -> void:
+	var version_info: Dictionary = Engine.get_version_info()
+	var godot_version := "%s.%s.%s%s" % [
+		version_info.get("major", 0),
+		version_info.get("minor", 0),
+		version_info.get("patch", 0),
+		str(version_info.get("status", "")),
+	]
+	_log_advanced("INFO", "Advanced log — technical diagnostics for pairing and connection events.")
+	_log_advanced("SYS", "OS: %s %s (%s)" % [OS.get_name(), OS.get_version(), OS.get_version_alias()])
+	_log_advanced("SYS", "Godot: %s (%s)" % [godot_version, str(version_info.get("build", "unknown"))])
+	_log_advanced("SYS", "Locale: %s | Display: %s" % [OS.get_locale(), DisplayServer.screen_get_size(DisplayServer.get_primary_screen())])
+	_log_advanced("SYS", "Bluetooth platform: %s" % Bluetooth.get_platform_name())
+
+
+func _log_advanced_bluetooth_state() -> void:
+	var caps: Dictionary = Bluetooth.get_capabilities()
+	_log_advanced("BT", "Backend available: %s" % str(Bluetooth.is_bluetooth_available()))
+	_log_advanced("BT", "Radio on: %s" % str(Bluetooth.is_radio_on()))
+	_log_advanced("BT", "Can unpair while connected: %s" % str(Bluetooth.can_unpair_while_connected()))
+	for key in caps.keys():
+		_log_advanced("BT", "Capability %s = %s" % [str(key), str(caps[key])])
+
+
+func _addresses_match(a: String, b: String) -> bool:
+	if a.is_empty() or b.is_empty():
+		return false
+	if a == b:
+		return true
+	if Bluetooth.is_valid_bluetooth_address(a) and Bluetooth.is_valid_bluetooth_address(b):
+		return Bluetooth.normalize_address(a) == Bluetooth.normalize_address(b)
+	return a in b or b in a
+
+
+func _is_pending_for_address(address: String) -> bool:
+	return _pending_operation != DeviceAction.NONE and _addresses_match(_pending_address, address)
+
+
+func _pending_operation_name() -> String:
+	match _pending_operation:
+		DeviceAction.PAIR:
+			return "pair_device"
+		DeviceAction.CONNECT:
+			return "connect_device"
+		DeviceAction.DISCONNECT:
+			return "disconnect_device"
+		DeviceAction.UNPAIR:
+			return "unpair_device"
+		_:
+			return ""
 
 
 func _trim_log(text_edit: TextEdit) -> void:
@@ -283,6 +383,10 @@ func _on_scan_button_pressed() -> void:
 	_dot_timer = 0.0
 	_set_status("Starting Bluetooth scan...")
 	_log("Scan requested — known devices stay listed; new ones appear as they are found.")
+	if _presenter.named_only_filter:
+		_log("Note: 'Named devices only' is ON — unnamed nearby devices are logged but hidden from the list.")
+	_scan_start_pending = true
+	_scan_start_wait_sec = 0.0
 	Bluetooth.start_scan()
 
 
@@ -358,13 +462,11 @@ func _on_unpair_pressed() -> void:
 		_set_status("%s is not paired." % label)
 		return
 
-	if state.get("connected", false) and not Bluetooth.can_unpair_while_connected():
-		_log_advanced("ERROR", "Unpair blocked — disconnect %s first." % label)
-		_set_status("Disconnect %s before unpairing." % label)
-		return
-
 	if state.get("connected", false):
-		_log_advanced("UNPAIR", "Device connected — backend will disconnect before unpairing %s." % label)
+		_set_status("Disconnecting %s before unpair..." % label)
+		_log_advanced("UNPAIR", "Device connected — disconnecting before unpair: %s" % label)
+	else:
+		_set_status("Unpairing %s..." % label)
 
 	_set_pending_operation(DeviceAction.UNPAIR, state.get("address", address))
 	_log_advanced("UNPAIR", "Attempting unpair of %s (%s)" % [label, state.get("address", address)])
@@ -380,7 +482,7 @@ func _on_refresh_paired_pressed() -> void:
 
 func _on_device_found(device_info: Dictionary) -> void:
 	var before_count: int = _presenter.get_cached_count()
-	_presenter.handle_device_found(device_info)
+	var hidden_by_filter: bool = _presenter.handle_device_found(device_info)
 	if _is_scanning and _presenter.get_cached_count() > before_count:
 		_devices_found_this_scan += 1
 	var address: String = device_info.get("address", "")
@@ -388,27 +490,50 @@ func _on_device_found(device_info: Dictionary) -> void:
 	if name.is_empty():
 		name = "Unnamed Device"
 	var device_class: String = device_info.get("device_class", "unknown")
-	_log("Found: %s (%s) [%s]" % [name, address, device_class])
+	var paired: bool = device_info.get("paired", false)
+	var connected: bool = device_info.get("connected", false)
+	_log("Found: %s (%s) [%s] paired=%s connected=%s" % [
+		name, address, device_class, str(paired), str(connected)
+	])
+	if hidden_by_filter:
+		_log("Hidden by filter: turn off 'Named devices only' to show this device in the list.")
 
 
 func _on_device_removed(address: String) -> void:
 	var label: String = _presenter.get_removal_log_label(address)
+	var was_unpair_pending := _pending_operation == DeviceAction.UNPAIR and _addresses_match(_pending_address, address)
 	_presenter.handle_device_removed(address)
 	_log("Device removed: %s" % label)
-	_clear_pending_operation()
+	if was_unpair_pending:
+		_log_advanced("UNPAIR", "Unpair succeeded: %s (%s)" % [label, address])
+		_clear_pending_operation()
 	_update_device_action_button()
 
 
 func _on_scan_started() -> void:
+	_scan_start_pending = false
+	_scan_start_wait_sec = 0.0
 	_set_scan_ui_active(true)
 	_set_status("Scanning — discovery active")
 	_log("Scan started. DeviceWatcher is running on the native backend.")
 
 
 func _on_scan_stopped() -> void:
+	_scan_start_pending = false
+	_scan_start_wait_sec = 0.0
 	_set_scan_ui_active(false)
 	_set_status("Scan stopped. Found %d device(s) this session." % _devices_found_this_scan)
 	_log("Scan stopped. Total discovered this scan: %d" % _devices_found_this_scan)
+
+
+func _report_scan_start_stalled() -> void:
+	if not _scan_start_pending or _is_scanning:
+		return
+	_scan_start_pending = false
+	_scan_start_wait_sec = 0.0
+	_set_status("Scan start delayed")
+	_log("Scan did not start within %.0f seconds. The Bluetooth worker may still be refreshing paired devices — try again shortly." % SCAN_START_TIMEOUT_SEC)
+	_log_advanced("ERROR", "scan_started signal was not received within %.0f seconds of start_scan()." % SCAN_START_TIMEOUT_SEC)
 
 
 func _on_pairing_started(address: String) -> void:
@@ -419,6 +544,8 @@ func _on_pairing_started(address: String) -> void:
 func _on_pairing_succeeded(address: String) -> void:
 	_set_status("Paired %s" % address)
 	_log("Pairing succeeded: %s" % address)
+	if _pending_operation == DeviceAction.PAIR and _addresses_match(_pending_address, address):
+		_log_advanced("PAIR", "Pairing succeeded: %s" % address)
 	_presenter.handle_pairing_succeeded(address)
 	_clear_pending_operation()
 	_update_device_action_button()
@@ -427,7 +554,8 @@ func _on_pairing_succeeded(address: String) -> void:
 func _on_pairing_failed(address: String, error: String) -> void:
 	_set_status("Pairing failed.")
 	_log("Pairing failed for %s: %s" % [address, error])
-	_log_advanced("ERROR", "Pairing failed for %s: %s" % [address, error])
+	if _pending_operation == DeviceAction.PAIR and _addresses_match(_pending_address, address):
+		_log_advanced("ERROR", "Pairing failed for %s: %s" % [address, error])
 	_clear_pending_operation()
 	_update_device_action_button()
 
@@ -436,22 +564,47 @@ func _on_connection_changed(address: String, connected: bool, message: String = 
 	var state := "connected" if connected else "disconnected"
 	_set_status("%s is %s" % [address, state])
 	_log("Connection changed: %s -> %s" % [address, state])
+
+	var device_state: Dictionary = _presenter.get_device_state(address)
+	var is_paired: bool = device_state.get("paired", false)
+	var is_pending: bool = _is_pending_for_address(address)
+	var is_paired_or_pairing: bool = is_paired or (is_pending and _pending_operation == DeviceAction.PAIR)
+
 	if connected:
-		_log_advanced("CONNECT", "Connected to %s" % address)
+		if is_pending and _pending_operation == DeviceAction.CONNECT:
+			_log_advanced("CONNECT", "Connect succeeded: %s" % address)
+		elif is_paired_or_pairing:
+			_log_advanced("CONNECT", "Paired device connected: %s" % address)
 	else:
-		_log_advanced("DISCONNECT", "Disconnected from %s" % address)
+		if is_pending and _pending_operation == DeviceAction.DISCONNECT:
+			_log_advanced("DISCONNECT", "Disconnect succeeded: %s" % address)
+		elif is_paired and _pending_operation != DeviceAction.UNPAIR:
+			_log_advanced("DISCONNECT", "Paired device disconnected: %s" % address)
+
 	if not message.is_empty():
 		_log("  %s" % message)
-		if message.to_lower().contains("error") or message.to_lower().contains("fail") or message.to_lower().contains("unable"):
+		var message_lower := message.to_lower()
+		var looks_like_error := message_lower.contains("error") or message_lower.contains("fail") or message_lower.contains("unable")
+		if is_pending and looks_like_error:
 			_log_advanced("ERROR", "Connection note for %s: %s" % [address, message])
+
 	_presenter.handle_connection_changed(address, connected)
-	_clear_pending_operation()
+	if is_pending and _pending_operation in [DeviceAction.CONNECT, DeviceAction.DISCONNECT]:
+		_clear_pending_operation()
 	_update_device_action_button()
 
 
-func _on_error_occurred(operation: String, message: String) -> void:
+func _on_error_occurred(operation: String, message: String, _error_code: int = 0) -> void:
 	_set_status("Error during %s" % operation)
 	_log("Error [%s]: %s" % [operation, message])
-	_log_advanced("ERROR", "[%s] %s" % [operation, message])
+	if operation == "initialize":
+		_log("Scan disabled: Bluetooth initialize failed. See message above.")
+		_set_scan_ui_active(false)
+	if operation == "start_scan":
+		_scan_start_pending = false
+		_set_scan_ui_active(false)
+		_log("Scan aborted due to backend error. See message above.")
+	if _pending_operation != DeviceAction.NONE and operation == _pending_operation_name():
+		_log_advanced("ERROR", "[%s] %s" % [operation, message])
 	_clear_pending_operation()
 	_update_device_action_button()

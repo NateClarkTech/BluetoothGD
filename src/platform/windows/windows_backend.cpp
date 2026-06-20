@@ -10,6 +10,7 @@
 
 #include <cstdio>
 #include <string_view>
+#include <thread>
 
 using namespace winrt;
 using namespace Windows::Devices::Bluetooth;
@@ -253,20 +254,31 @@ bool is_bluetooth_hid_device_id(const godot::String &p_device_id) {
 	return p_device_id.contains("BTHENUM") || p_device_id.contains("BTHLEDEVICE") || p_device_id.contains("Bluetooth");
 }
 
+void ingest_hid_addresses_into_cache(const DeviceInformationCollection &p_devices, HidGamepadCache &p_cache) {
+	for (const auto &device_info : p_devices) {
+		const godot::String device_id = hstring_to_godot(device_info.Id());
+		if (!is_bluetooth_hid_device_id(device_id) && !device_id.contains("VID_045E")) {
+			continue;
+		}
+		const godot::String address = normalize_address(extract_address_from_device_id(device_id));
+		if (!address.is_empty()) {
+			p_cache.results[address] = true;
+		}
+	}
+}
+
 void refresh_hid_gamepad_cache_locked(HidGamepadCache &p_cache) {
 	p_cache.results.clear();
 	try {
-		const auto selector = HidDevice::GetDeviceSelector(0x0001, 0x0005);
-		const auto devices = DeviceInformation::FindAllAsync(selector).get();
-		for (const auto &device_info : devices) {
-			const godot::String device_id = hstring_to_godot(device_info.Id());
-			if (!is_bluetooth_hid_device_id(device_id)) {
-				continue;
-			}
-			const godot::String address = normalize_address(extract_address_from_device_id(device_id));
-			if (!address.is_empty()) {
-				p_cache.results[address] = true;
-			}
+		ingest_hid_addresses_into_cache(
+				DeviceInformation::FindAllAsync(HidDevice::GetDeviceSelector(0x0001, 0x0005)).get(), p_cache);
+
+		static const uint16_t xbox_vendor_pids[] = {
+				0x02E0, 0x02FD, 0x02FF, 0x0B05, 0x0B13, 0x0B20, 0x0B22, 0,
+		};
+		for (int i = 0; xbox_vendor_pids[i] != 0; i++) {
+			const auto xbox_selector = HidDevice::GetDeviceSelector(0x0001, 0x0005, 0x045E, xbox_vendor_pids[i]);
+			ingest_hid_addresses_into_cache(DeviceInformation::FindAllAsync(xbox_selector).get(), p_cache);
 		}
 	} catch (...) {
 	}
@@ -330,7 +342,6 @@ bool WindowsBackend::initialize() {
 	}
 
 	initialized = true;
-	refresh_paired_devices();
 	return true;
 }
 
@@ -396,7 +407,7 @@ void WindowsBackend::upsert_device(const DeviceInfo &p_info, bool p_emit_event, 
 
 void WindowsBackend::handle_device_added(const DeviceInformation &p_info) {
 	const DeviceInfo info = make_device_info(p_info);
-	upsert_device(info, true);
+	upsert_device(info, true, scanning);
 }
 
 void WindowsBackend::enumerate_snapshot(const hstring &p_selector, bool p_emit_events, bool p_force_emit) {
@@ -416,17 +427,27 @@ void WindowsBackend::enumerate_snapshot(const hstring &p_selector, bool p_emit_e
 }
 
 void WindowsBackend::enumerate_hid_gamepads(bool p_emit_events, bool p_force_emit) {
-	try {
-		const auto selector = HidDevice::GetDeviceSelector(0x0001, 0x0005);
-		const auto devices = DeviceInformation::FindAllAsync(selector).get();
-		for (const auto &device_info : devices) {
+	auto ingest_hid_gamepads = [&](const DeviceInformationCollection &p_devices) {
+		for (const auto &device_info : p_devices) {
 			const godot::String device_id = hstring_to_godot(device_info.Id());
-			if (!is_bluetooth_hid_device_id(device_id)) {
+			if (!is_bluetooth_hid_device_id(device_id) && !device_id.contains("VID_045E")) {
 				continue;
 			}
 			DeviceInfo info = make_hid_gamepad_info(device_info);
 			info.paired = true;
 			upsert_device(info, p_emit_events, p_force_emit);
+		}
+	};
+
+	try {
+		ingest_hid_gamepads(DeviceInformation::FindAllAsync(HidDevice::GetDeviceSelector(0x0001, 0x0005)).get());
+
+		static const uint16_t xbox_vendor_pids[] = {
+				0x02E0, 0x02FD, 0x02FF, 0x0B05, 0x0B13, 0x0B20, 0x0B22, 0,
+		};
+		for (int i = 0; xbox_vendor_pids[i] != 0; i++) {
+			const auto xbox_selector = HidDevice::GetDeviceSelector(0x0001, 0x0005, 0x045E, xbox_vendor_pids[i]);
+			ingest_hid_gamepads(DeviceInformation::FindAllAsync(xbox_selector).get());
 		}
 	} catch (const winrt::hresult_error &error) {
 		emit_error("enumerate_hid_gamepads",
@@ -527,6 +548,20 @@ void WindowsBackend::start_device_watcher(const hstring &p_selector, DeviceInfor
 	active_watchers.push_back(std::move(active));
 }
 
+bool WindowsBackend::try_start_device_watcher(const hstring &p_selector, DeviceInformationKind p_kind) {
+	try {
+		start_device_watcher(p_selector, p_kind);
+		return true;
+	} catch (const winrt::hresult_error &error) {
+		emit_error("start_scan",
+				format_winrt_error("start_scan",
+						error,
+						"selector=\"" + hstring_to_godot(p_selector) +
+								"\"; DeviceWatcher creation or Start() failed"));
+		return false;
+	}
+}
+
 void WindowsBackend::stop_all_watchers() {
 	for (ActiveDeviceWatcher &active : active_watchers) {
 		if (!active.watcher) {
@@ -546,6 +581,7 @@ void WindowsBackend::stop_all_watchers() {
 
 void WindowsBackend::start_scan(const ScanOptions &p_options) {
 	if (!initialized && !initialize()) {
+		emit_error("start_scan", "start_scan failed: backend initialize() returned false.");
 		return;
 	}
 	if (scanning) {
@@ -554,34 +590,45 @@ void WindowsBackend::start_scan(const ScanOptions &p_options) {
 
 	scan_options = p_options;
 
-	try {
-		BluetoothEvent started;
-		started.type = EventType::SCAN_STARTED;
-		emit(started);
+	BluetoothEvent started;
+	started.type = EventType::SCAN_STARTED;
+	emit(started);
 
-		enumerate_snapshot(BluetoothDevice::GetDeviceSelectorFromPairingState(true), false, false);
-		enumerate_snapshot(BluetoothLEDevice::GetDeviceSelectorFromPairingState(true), false, false);
-		enumerate_snapshot(BluetoothDevice::GetDeviceSelector(), false, false);
-		enumerate_snapshot(BluetoothLEDevice::GetDeviceSelector(), false, false);
-		if (!scan_options.gamepads_only) {
-			enumerate_hid_gamepads(false, false);
+	// Sync paired devices silently; emit a single batch update (same pattern as Linux start_scan).
+	enumerate_snapshot(BluetoothDevice::GetDeviceSelectorFromPairingState(true), false, false);
+	enumerate_snapshot(BluetoothLEDevice::GetDeviceSelectorFromPairingState(true), false, false);
+	if (!scan_options.gamepads_only) {
+		enumerate_hid_gamepads(false, false);
+	}
+	emit_paired_devices_updated();
+
+	// Emit devices already visible to Windows before watchers attach.
+	enumerate_snapshot(BluetoothDevice::GetDeviceSelector(), true, true);
+	enumerate_snapshot(BluetoothLEDevice::GetDeviceSelector(), true, true);
+
+	scanning = true;
+
+	int watchers_started = 0;
+	auto start_watcher = [&](const hstring &p_selector, DeviceInformationKind p_kind = DeviceInformationKind::Unknown) {
+		if (try_start_device_watcher(p_selector, p_kind)) {
+			watchers_started++;
 		}
-		emit_paired_devices_updated();
+	};
 
-		start_device_watcher(BluetoothDevice::GetDeviceSelectorFromPairingState(false));
-		start_device_watcher(BluetoothLEDevice::GetDeviceSelectorFromPairingState(false),
-				DeviceInformationKind::AssociationEndpoint);
-		start_device_watcher(hstring(AEP_BLUETOOTH_PROTOCOL_SELECTOR), DeviceInformationKind::AssociationEndpoint);
-		start_device_watcher(hstring(AEP_BLUETOOTH_LE_PROTOCOL_SELECTOR), DeviceInformationKind::AssociationEndpoint);
+	start_watcher(BluetoothDevice::GetDeviceSelectorFromPairingState(false));
+	start_watcher(BluetoothLEDevice::GetDeviceSelectorFromPairingState(false),
+			DeviceInformationKind::AssociationEndpoint);
+	start_watcher(hstring(AEP_BLUETOOTH_PROTOCOL_SELECTOR), DeviceInformationKind::AssociationEndpoint);
+	start_watcher(hstring(AEP_BLUETOOTH_LE_PROTOCOL_SELECTOR), DeviceInformationKind::AssociationEndpoint);
 
-		scanning = true;
-	} catch (const winrt::hresult_error &error) {
-		stop_all_watchers();
+	if (watchers_started == 0) {
+		scanning = false;
+		BluetoothEvent stopped;
+		stopped.type = EventType::SCAN_STOPPED;
+		emit(stopped);
 		emit_error("start_scan",
-				format_winrt_error("start_scan",
-						error,
-						"Failed while creating or starting one or more DeviceWatcher instances "
-						"(Classic unpaired, BLE unpaired/AEP, Bluetooth AEP, Bluetooth LE AEP)"));
+				"start_scan failed: no DeviceWatcher instances could be started. "
+				"Check earlier start_scan errors for per-selector HRESULT details.");
 	}
 }
 
@@ -622,7 +669,27 @@ DeviceInformation WindowsBackend::find_device_information(const godot::String &p
 		if (devices.Size() > 0) {
 			return devices.GetAt(0);
 		}
+
+		const auto le_selector = BluetoothLEDevice::GetDeviceSelectorFromBluetoothAddress(parsed.value());
+		const auto le_devices = DeviceInformation::FindAllAsync(le_selector).get();
+		if (le_devices.Size() > 0) {
+			return le_devices.GetAt(0);
+		}
 	} catch (...) {
+	}
+
+	DeviceInformation cached_match = nullptr;
+	cache.for_each_discovered([&](const godot::String &p_key, DeviceInfo &p_info) {
+		(void)p_key;
+		if (cached_match) {
+			return;
+		}
+		if (addresses_match(p_info.address, normalized) && !p_info.device_id.is_empty()) {
+			cached_match = find_device_information_by_id(p_info.device_id);
+		}
+	});
+	if (cached_match) {
+		return cached_match;
 	}
 
 	return nullptr;
@@ -641,6 +708,10 @@ void WindowsBackend::handle_pairing_requested(const DevicePairingRequestedEventA
 	const auto pairing_kind = p_args.PairingKind();
 	const godot::String pin = hstring_to_godot(p_args.Pin());
 
+	auto consume_user_response = [&](PairingUserResponse &p_out) -> bool {
+		return pairing_pending.wait_for_response(0, p_out);
+	};
+
 	switch (pairing_kind) {
 		case DevicePairingKinds::ConfirmOnly:
 		case DevicePairingKinds::ConfirmPinMatch: {
@@ -656,7 +727,14 @@ void WindowsBackend::handle_pairing_requested(const DevicePairingRequestedEventA
 			emit(event);
 
 			PairingUserResponse response;
-			if (pairing_pending.wait_for_response(120000, response) && response.accepted) {
+			if (consume_user_response(response) && response.accepted) {
+				if (!pin.is_empty()) {
+					p_args.Accept(godot_to_hstring(pin));
+				} else {
+					p_args.Accept();
+				}
+			} else {
+				// Gamepads (Xbox, etc.) use ConfirmOnly — auto-accept for instant pairing.
 				if (!pin.is_empty()) {
 					p_args.Accept(godot_to_hstring(pin));
 				} else {
@@ -676,8 +754,10 @@ void WindowsBackend::handle_pairing_requested(const DevicePairingRequestedEventA
 			emit(event);
 
 			PairingUserResponse response;
-			if (pairing_pending.wait_for_response(120000, response) && response.accepted && !response.pin.is_empty()) {
+			if (consume_user_response(response) && response.accepted && !response.pin.is_empty()) {
 				p_args.Accept(godot_to_hstring(response.pin));
+			} else {
+				p_args.Accept(L"0000");
 			}
 			pairing_pending.reset();
 			break;
@@ -693,7 +773,7 @@ void WindowsBackend::handle_pairing_requested(const DevicePairingRequestedEventA
 			emit(event);
 
 			PairingUserResponse response;
-			pairing_pending.wait_for_response(3000, response);
+			consume_user_response(response);
 			p_args.Accept();
 			pairing_pending.reset();
 			break;
@@ -701,6 +781,87 @@ void WindowsBackend::handle_pairing_requested(const DevicePairingRequestedEventA
 		default:
 			break;
 	}
+}
+
+void WindowsBackend::finalize_pairing_success(const godot::String &p_device_id,
+		const godot::String &p_fallback_address) {
+	const godot::String normalized = normalize_address(p_fallback_address);
+
+	// Xbox and similar controllers register on the HID stack shortly after pairing.
+	for (int attempt = 0; attempt < 6; attempt++) {
+		enumerate_snapshot(BluetoothDevice::GetDeviceSelectorFromPairingState(true), false, false);
+		enumerate_snapshot(BluetoothLEDevice::GetDeviceSelectorFromPairingState(true), false, false);
+		enumerate_hid_gamepads(false, false);
+
+		bool paired = false;
+		if (cache.lookup_cached_state(normalized, paired, [](const DeviceInfo &p_info) { return p_info.paired; }) &&
+				paired) {
+			break;
+		}
+		if (attempt < 5) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+		}
+	}
+
+	DeviceInformation device_info = find_device_information_by_id(p_device_id);
+	if (!device_info) {
+		device_info = find_device_information(normalized);
+	}
+
+	DeviceInfo info;
+	if (device_info) {
+		info = make_device_info(device_info);
+	} else {
+		info.device_id = p_device_id;
+		info.address = normalized;
+		apply_display_name_fallback(info);
+		info.device_class = infer_device_class(info.name);
+	}
+	info.paired = true;
+
+	cache.for_each_discovered([&](const godot::String &p_key, DeviceInfo &p_info) {
+		(void)p_key;
+		if (addresses_match(p_info.address, normalized) || p_info.device_id == p_device_id) {
+			merge_device_identity(info, p_info);
+		}
+	});
+	if (info.name == "HID Gamepad" || info.name.is_empty()) {
+		apply_display_name_fallback(info);
+		info.device_class = infer_device_class(info.name);
+	}
+
+	godot::String event_address = normalized;
+	if (is_valid_bluetooth_address(info.address)) {
+		event_address = normalize_address(info.address);
+		const auto parsed = parse_bluetooth_address(event_address);
+		if (parsed.has_value()) {
+			bool connected = false;
+			try {
+				const auto device = BluetoothDevice::FromBluetoothAddressAsync(parsed.value()).get();
+				if (device && device.ConnectionStatus() == BluetoothConnectionStatus::Connected) {
+					connected = true;
+				}
+			} catch (...) {
+			}
+			if (!connected) {
+				connected = hid_gamepad_cache.is_connected(event_address);
+			}
+			info.connected = connected;
+		}
+	}
+
+	upsert_device(info, true, true);
+
+	BluetoothEvent succeeded;
+	succeeded.type = EventType::PAIRING_SUCCEEDED;
+	succeeded.address = event_address;
+	emit(succeeded);
+
+	if (is_valid_bluetooth_address(event_address)) {
+		update_connection_state(event_address, false, true);
+	}
+
+	emit_paired_devices_updated();
 }
 
 void WindowsBackend::perform_pairing(const DeviceInformation &p_device_info, const godot::String &p_address) {
@@ -711,11 +872,7 @@ void WindowsBackend::perform_pairing(const DeviceInformation &p_device_info, con
 
 	if (pairing.CanPair()) {
 		if (pairing.IsPaired()) {
-			BluetoothEvent succeeded;
-			succeeded.type = EventType::PAIRING_SUCCEEDED;
-			succeeded.address = normalized;
-			emit(succeeded);
-			refresh_paired_devices();
+			finalize_pairing_success(resolved_device_id, normalized);
 			return;
 		}
 
@@ -735,11 +892,7 @@ void WindowsBackend::perform_pairing(const DeviceInformation &p_device_info, con
 			result = pairing.PairAsync(DevicePairingProtectionLevel::EncryptionAndAuthentication).get();
 		}
 	} else if (pairing.IsPaired()) {
-		BluetoothEvent succeeded;
-		succeeded.type = EventType::PAIRING_SUCCEEDED;
-		succeeded.address = normalized;
-		emit(succeeded);
-		refresh_paired_devices();
+		finalize_pairing_success(resolved_device_id, normalized);
 		return;
 	} else {
 		BluetoothEvent failed;
@@ -754,11 +907,7 @@ void WindowsBackend::perform_pairing(const DeviceInformation &p_device_info, con
 
 	if (result && (result.Status() == DevicePairingResultStatus::Paired ||
 						  result.Status() == DevicePairingResultStatus::AlreadyPaired)) {
-		BluetoothEvent succeeded;
-		succeeded.type = EventType::PAIRING_SUCCEEDED;
-		succeeded.address = normalized;
-		emit(succeeded);
-		refresh_paired_devices();
+		finalize_pairing_success(resolved_device_id, normalized);
 	} else {
 		BluetoothEvent failed;
 		failed.type = EventType::PAIRING_FAILED;
@@ -873,8 +1022,39 @@ void WindowsBackend::submit_pairing_response(const PairingUserResponse &p_respon
 	pairing_pending.submit(p_response);
 }
 
+void WindowsBackend::disconnect_before_unpair(const godot::String &p_normalized) {
+	try {
+		const auto parsed = parse_bluetooth_address(p_normalized);
+		if (parsed.has_value()) {
+			try {
+				const auto le_device = BluetoothLEDevice::FromBluetoothAddressAsync(parsed.value()).get();
+				if (le_device) {
+					le_device.Close();
+				}
+			} catch (...) {
+			}
+		}
+	} catch (...) {
+	}
+
+	update_connection_state(p_normalized, false, false);
+}
+
 void WindowsBackend::unpair_device(const godot::String &p_address) {
 	const godot::String normalized = normalize_address(p_address);
+
+	if (is_connected(normalized)) {
+		disconnect_before_unpair(normalized);
+
+		BluetoothEvent disconnected;
+		disconnected.type = EventType::CONNECTION_CHANGED;
+		disconnected.address = normalized;
+		disconnected.connected = is_connected(normalized);
+		disconnected.message =
+				"unpair_device disconnected \"" + normalized + "\" before removing pairing "
+				"(HID gamepads may still appear active until unpair completes).";
+		emit(disconnected);
+	}
 
 	try {
 		const auto device_info = find_device_information(normalized);
@@ -1060,6 +1240,7 @@ void WindowsBackend::update_connection_state(const godot::String &p_address, boo
 
 void WindowsBackend::refresh_paired_devices() {
 	enumerate_snapshot(BluetoothDevice::GetDeviceSelectorFromPairingState(true), false, false);
+	enumerate_snapshot(BluetoothLEDevice::GetDeviceSelectorFromPairingState(true), false, false);
 	enumerate_hid_gamepads(false, false);
 	emit_paired_devices_updated();
 }
@@ -1107,7 +1288,7 @@ godot::Dictionary WindowsBackend::get_capabilities() const {
 	caps["pair_by_device_id"] = true;
 	caps["radio_state_query"] = true;
 	caps["force_disconnect_hid"] = false;
-	caps["unpair_while_connected"] = false;
+	caps["unpair_while_connected"] = true;
 	caps["scan_filter_named_only"] = true;
 	caps["scan_filter_gamepads_only"] = true;
 	return caps;

@@ -73,6 +73,12 @@ void WorkerThread::thread_main() {
 		return;
 	}
 
+	{
+		BluetoothEvent initialized;
+		initialized.type = EventType::BACKEND_INITIALIZED;
+		event_queue.push(initialized);
+	}
+
 	while (running.load()) {
 		auto command = command_queue.wait_pop(100);
 		if (!command.has_value()) {

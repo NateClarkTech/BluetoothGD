@@ -510,7 +510,6 @@ bool LinuxBackend::initialize() {
 	register_signal_matches();
 
 	initialized = true;
-	refresh_paired_devices();
 	return true;
 }
 
@@ -747,10 +746,13 @@ void LinuxBackend::unpair_device(const godot::String &p_address) {
 			disconnected.message = "unpair_device disconnected \"" + normalized + "\" before removing pairing.";
 			emit(disconnected);
 		} else {
-			emit_error("unpair_device",
-					"unpair_device failed to disconnect \"" + normalized + "\" (device_path=\"" + device_path +
-							"\") before unpair: " + dbus.get_last_error());
-			return;
+			BluetoothEvent disconnect_note;
+			disconnect_note.type = EventType::CONNECTION_CHANGED;
+			disconnect_note.address = normalized;
+			disconnect_note.connected = true;
+			disconnect_note.message = "unpair_device: disconnect before unpair failed for \"" + normalized +
+					"\" (" + dbus.get_last_error() + "); proceeding with unpair.";
+			emit(disconnect_note);
 		}
 	}
 

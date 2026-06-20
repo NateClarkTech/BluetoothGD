@@ -45,6 +45,44 @@ godot::String extract_address_from_device_id(const godot::String &p_device_id) {
 		}
 	}
 
+	// BTHENUM paths often embed the MAC with dashes, e.g. Dev_...-AA-BB-CC-DD-EE-FF
+	const godot::String normalized_id = normalize_address(id);
+	const int mac_len = 17;
+	for (int i = 0; i <= normalized_id.length() - mac_len; i++) {
+		const godot::String candidate = normalized_id.substr(i, mac_len);
+		if (parse_bluetooth_address(candidate).has_value()) {
+			return normalize_address(candidate);
+		}
+	}
+
+	// BTHENUM paths also embed the MAC as 12 contiguous hex digits, e.g. Dev_987A1486C3D3
+	const godot::String dev_marker = "Dev_";
+	const int dev_start = id.find(dev_marker);
+	if (dev_start >= 0) {
+		godot::String hex;
+		for (int i = dev_start + dev_marker.length(); i < id.length() && hex.length() < 12; i++) {
+			const godot::CharString ch = id.substr(i, 1).ascii();
+			const char c = ch.length() > 0 ? ch[0] : '\0';
+			if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
+				hex += id.substr(i, 1).to_upper();
+			} else if (!hex.is_empty()) {
+				break;
+			}
+		}
+		if (hex.length() == 12) {
+			godot::String formatted;
+			for (int i = 0; i < 12; i += 2) {
+				if (i > 0) {
+					formatted += ":";
+				}
+				formatted += hex.substr(i, 2);
+			}
+			if (parse_bluetooth_address(formatted).has_value()) {
+				return formatted;
+			}
+		}
+	}
+
 	return "";
 }
 

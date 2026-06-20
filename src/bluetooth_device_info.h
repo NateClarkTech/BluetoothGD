@@ -118,6 +118,28 @@ inline void clear_unhelpful_device_name(DeviceInfo &p_info) {
 	}
 }
 
+inline void merge_device_identity(DeviceInfo &p_target, const DeviceInfo &p_source) {
+	p_target.paired = p_target.paired || p_source.paired;
+	if (p_target.name.is_empty() || is_mac_address_name(p_target.name, p_target.address)) {
+		if (!p_source.name.is_empty() && !is_mac_address_name(p_source.name, p_source.address)) {
+			p_target.name = p_source.name;
+		}
+	}
+	if (p_target.device_class.is_empty() || p_target.device_class == "unknown") {
+		if (!p_source.device_class.is_empty() && p_source.device_class != "unknown") {
+			p_target.device_class = p_source.device_class;
+		}
+	}
+	if (p_target.device_id.is_empty() && !p_source.device_id.is_empty()) {
+		p_target.device_id = p_source.device_id;
+	}
+}
+
+inline void merge_device_endpoints(DeviceInfo &p_target, const DeviceInfo &p_source) {
+	merge_device_identity(p_target, p_source);
+	p_target.connected = p_target.connected || p_source.connected;
+}
+
 inline godot::String infer_device_class(const godot::String &p_name) {
 	godot::String lower = p_name.to_lower();
 	if (lower.contains("xbox") || lower.contains("controller") || lower.contains("gamepad") ||

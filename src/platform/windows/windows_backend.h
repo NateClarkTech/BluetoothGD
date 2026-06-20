@@ -77,6 +77,9 @@ private:
 	void start_device_watcher(const winrt::hstring &p_selector,
 			winrt::Windows::Devices::Enumeration::DeviceInformationKind p_kind =
 					winrt::Windows::Devices::Enumeration::DeviceInformationKind::Unknown);
+	bool try_start_device_watcher(const winrt::hstring &p_selector,
+			winrt::Windows::Devices::Enumeration::DeviceInformationKind p_kind =
+					winrt::Windows::Devices::Enumeration::DeviceInformationKind::Unknown);
 	void stop_all_watchers();
 	void upsert_device(const DeviceInfo &p_info, bool p_emit_event, bool p_force_emit = false);
 
@@ -84,6 +87,8 @@ private:
 	winrt::Windows::Devices::Enumeration::DeviceInformation find_device_information_by_id(const godot::String &p_device_id);
 	void perform_pairing(const winrt::Windows::Devices::Enumeration::DeviceInformation &p_device_info,
 			const godot::String &p_address);
+	void finalize_pairing_success(const godot::String &p_device_id, const godot::String &p_fallback_address);
+	void disconnect_before_unpair(const godot::String &p_normalized);
 	void update_connection_state(const godot::String &p_address, bool p_report_errors = false, bool p_emit_event = true);
 
 	bool initialized = false;

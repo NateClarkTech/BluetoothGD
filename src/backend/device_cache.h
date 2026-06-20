@@ -47,14 +47,14 @@ public:
 			}
 		}
 		for (int i = 0; i < stale_keys.size(); i++) {
+			if (discovered_devices.has(stale_keys[i])) {
+				merge_device_endpoints(info, discovered_devices[stale_keys[i]]);
+			}
 			remove_locked(stale_keys[i]);
 		}
 
 		if (discovered_devices.has(key)) {
-			const DeviceInfo existing = discovered_devices[key];
-			if (info.name.is_empty()) {
-				info.name = existing.name;
-			}
+			merge_device_identity(info, discovered_devices[key]);
 		}
 
 		discovered_devices[key] = info;
@@ -121,7 +121,8 @@ public:
 			return address_to_device_id[normalized];
 		}
 		for (const godot::KeyValue<godot::String, DeviceInfo> &item : discovered_devices) {
-			if (item.key == normalized || addresses_match(item.value.address, normalized)) {
+			if (item.key == normalized || addresses_match(item.value.address, normalized) ||
+					item.value.device_id == normalized) {
 				return item.value.device_id;
 			}
 		}

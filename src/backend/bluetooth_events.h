@@ -21,6 +21,7 @@ enum class EventType {
 	CONNECTION_CHANGED,
 	ERROR_OCCURRED,
 	PAIRED_DEVICES_UPDATED,
+	BACKEND_INITIALIZED,
 };
 
 struct BluetoothEvent {

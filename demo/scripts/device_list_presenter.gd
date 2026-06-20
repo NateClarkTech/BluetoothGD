@@ -60,10 +60,12 @@ func rebuild_from_bluetooth() -> void:
 	_rebuild_all()
 
 
-func handle_device_found(device_info: Dictionary) -> void:
+func handle_device_found(device_info: Dictionary) -> bool:
 	var key := _cache_key_for(device_info)
 	if key.is_empty():
-		return
+		return false
+
+	var hidden_by_filter := named_only_filter and not _has_friendly_name(device_info)
 
 	if not _discovery_order.has(key):
 		_discovery_sequence += 1
@@ -89,6 +91,7 @@ func handle_device_found(device_info: Dictionary) -> void:
 		_schedule_resort()
 
 	_update_counts()
+	return hidden_by_filter
 
 
 func get_removal_log_label(address: String) -> String:
@@ -148,19 +151,38 @@ func handle_connection_changed(address: String, connected: bool) -> void:
 
 
 func handle_pairing_succeeded(address: String) -> void:
+	var updated := false
 	for key in _tree_items:
 		var item: TreeItem = _tree_items[key]
 		var item_address := str(item.get_metadata(0))
 		if not _addresses_match(item_address, address) and not _addresses_match(key, address):
 			continue
+		var device_state := get_device_state(address)
 		var state: Dictionary = _item_states.get(key, {})
 		var old_rank := _device_sort_rank(state)
 		state["paired"] = true
+		if device_state.get("connected", false):
+			state["connected"] = true
 		_item_states[key] = state
 		item.set_text(3, _paired_status_text(true))
+		if state.get("connected", false):
+			item.set_text(4, _connected_status_text(true))
+			_apply_row_text_color(item, true)
 		if old_rank != _device_sort_rank(state):
 			_schedule_resort()
+		updated = true
 		break
+	if not updated:
+		for device_info in Bluetooth.get_discovered_devices():
+			if _addresses_match(_device_address(device_info), address):
+				handle_device_found(device_info)
+				updated = true
+				break
+	if not updated:
+		for device_info in Bluetooth.get_paired_devices():
+			if _addresses_match(_device_address(device_info), address):
+				handle_device_found(device_info)
+				break
 	_update_counts()
 
 
@@ -393,10 +415,15 @@ func _flash_row(item: TreeItem, key: String) -> void:
 		item.set_custom_color(column, FLASH_TEXT_COLOR)
 	var tw := create_tween()
 	tw.tween_interval(0.12)
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(item):
-			_apply_row_text_color(item, connected)
-	)
+	tw.tween_callback(_on_flash_row_complete.bind(key, connected))
+
+
+func _on_flash_row_complete(key: String, connected: bool) -> void:
+	if not _tree_items.has(key):
+		return
+	var item: TreeItem = _tree_items[key]
+	if is_instance_valid(item):
+		_apply_row_text_color(item, connected)
 
 
 func _device_address(device_info: Dictionary) -> String:
