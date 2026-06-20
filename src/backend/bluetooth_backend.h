@@ -4,6 +4,8 @@
 #include "bluetooth_events.h"
 #include "pairing_pending.h"
 
+#include <godot_cpp/variant/dictionary.hpp>
+
 #include <functional>
 
 namespace bluetooth {

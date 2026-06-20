@@ -5,6 +5,8 @@
 #include "../backend/bluetooth_events.h"
 #include "thread_safe_queue.h"
 
+#include <godot_cpp/variant/dictionary.hpp>
+
 #include <atomic>
 #include <memory>
 #include <thread>

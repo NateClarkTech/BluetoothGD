@@ -11,6 +11,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
+
 if(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(DBUS REQUIRED dbus-1)
@@ -77,10 +79,9 @@ if(BLUETOOTH_DOC_XML)
         COMMENT "Generating BluetoothManager editor documentation"
         VERBATIM
     )
-    add_custom_target(bluetooth_doc_source DEPENDS "${BLUETOOTH_DOC_SOURCE}")
     target_sources(${TARGET_NAME} PRIVATE "${BLUETOOTH_DOC_SOURCE}")
-    add_dependencies(${TARGET_NAME} bluetooth_doc_source)
     set_source_files_properties("${BLUETOOTH_DOC_SOURCE}" PROPERTIES GENERATED TRUE)
+    source_group("generated" FILES "${BLUETOOTH_DOC_SOURCE}")
 endif()
 
 target_include_directories(${TARGET_NAME} PRIVATE src)
