@@ -44,7 +44,7 @@ Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at 
 
 ## Requirements
 
-- [Godot 4.4+](https://godotengine.org/) (demo tested on 4.7)
+- [Godot 4.4+](https://godotengine.org/) (demo tested on 4.4 and 4.7)
 - [CMake](https://cmake.org/) 3.17+
 - C++17 compiler (C++20 on Windows for WinRT coroutines)
 - Git with submodules
