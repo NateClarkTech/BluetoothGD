@@ -18,6 +18,12 @@ if(UNIX AND NOT APPLE)
     pkg_check_modules(DBUS REQUIRED dbus-1)
 endif()
 
+# godot-cpp 4.4 ships a 4.4.1 API; pin bindings to 4.4.0 so the DLL loads on Godot 4.4.stable.
+set(GODOT_44_API_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/godot-4.4.0-api/extension_api.json")
+if(EXISTS "${GODOT_44_API_FILE}" AND NOT GODOTCPP_CUSTOM_API_FILE)
+    set(GODOTCPP_CUSTOM_API_FILE "${GODOT_44_API_FILE}" CACHE FILEPATH "Godot extension API JSON for godot-cpp bindings")
+endif()
+
 add_subdirectory(godot-cpp)
 
 set(TARGET_NAME bluetooth_manager)

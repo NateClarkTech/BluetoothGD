@@ -1,8 +1,8 @@
-[gd_scene format=3 uid="uid://ypx5im3hnb3y"]
+[gd_scene load_steps=2 format=3 uid="uid://ypx5im3hnb3y"]
 
 [ext_resource type="Script" uid="uid://rrnyvnbr8w1l" path="res://scenes/controller_pairing.gd" id="1_script"]
 
-[node name="ControllerPairing" type="Control" unique_id=531055918]
+[node name="ControllerPairing" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -11,7 +11,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_script")
 
-[node name="MarginContainer" type="MarginContainer" parent="." unique_id=1826522415]
+[node name="MarginContainer" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -23,29 +23,29 @@ theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 20
 theme_override_constants/margin_bottom = 16
 
-[node name="MainVBox" type="VBoxContainer" parent="MarginContainer" unique_id=1956033639]
+[node name="MainVBox" type="VBoxContainer" parent="MarginContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 10
 
-[node name="Title" type="Label" parent="MarginContainer/MainVBox" unique_id=405414778]
+[node name="Title" type="Label" parent="MarginContainer/MainVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 26
 text = "Bluetooth Controller Pairing"
 horizontal_alignment = 1
 
-[node name="StatusLabel" type="Label" parent="MarginContainer/MainVBox" unique_id=283379965]
+[node name="StatusLabel" type="Label" parent="MarginContainer/MainVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 text = "Ready"
 autowrap_mode = 3
 
-[node name="ScanPanel" type="VBoxContainer" parent="MarginContainer/MainVBox" unique_id=2084823129]
+[node name="ScanPanel" type="VBoxContainer" parent="MarginContainer/MainVBox"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ScanActivityLabel" type="Label" parent="MarginContainer/MainVBox/ScanPanel" unique_id=1549061178]
+[node name="ScanActivityLabel" type="Label" parent="MarginContainer/MainVBox/ScanPanel"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 2
@@ -53,64 +53,64 @@ theme_override_colors/font_color = Color(0.35, 0.75, 1, 1)
 text = "Scanning for nearby controllers..."
 autowrap_mode = 3
 
-[node name="ScanProgressBar" type="ProgressBar" parent="MarginContainer/MainVBox/ScanPanel" unique_id=229417624]
+[node name="ScanProgressBar" type="ProgressBar" parent="MarginContainer/MainVBox/ScanPanel"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(0, 14)
 layout_mode = 2
 show_percentage = false
 
-[node name="ButtonRow" type="HBoxContainer" parent="MarginContainer/MainVBox" unique_id=326548081]
+[node name="ButtonRow" type="HBoxContainer" parent="MarginContainer/MainVBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ScanButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow" unique_id=1433929000]
+[node name="ScanButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 disabled = true
 text = "Start Scan"
 
-[node name="RefreshPairedButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow" unique_id=1349907522]
+[node name="RefreshPairedButton" type="Button" parent="MarginContainer/MainVBox/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Refresh Paired"
 
-[node name="DevicesSection" type="VBoxContainer" parent="MarginContainer/MainVBox" unique_id=588335558]
+[node name="DevicesSection" type="VBoxContainer" parent="MarginContainer/MainVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_stretch_ratio = 3.0
 theme_override_constants/separation = 4
 
-[node name="DevicesFilterRow" type="HBoxContainer" parent="MarginContainer/MainVBox/DevicesSection" unique_id=519875277]
+[node name="DevicesFilterRow" type="HBoxContainer" parent="MarginContainer/MainVBox/DevicesSection"]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="DevicesHeader" type="Label" parent="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow" unique_id=1486905350]
+[node name="DevicesHeader" type="Label" parent="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 15
 text = "Devices"
 
-[node name="NamedOnlyCheckButton" type="CheckButton" parent="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow" unique_id=184125459]
+[node name="NamedOnlyCheckButton" type="CheckButton" parent="MarginContainer/MainVBox/DevicesSection/DevicesFilterRow"]
 unique_name_in_owner = true
 layout_mode = 2
 button_pressed = true
 text = "Named devices only"
 
-[node name="DevicesPanel" type="PanelContainer" parent="MarginContainer/MainVBox/DevicesSection" unique_id=920777917]
+[node name="DevicesPanel" type="PanelContainer" parent="MarginContainer/MainVBox/DevicesSection"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="DevicesMargin" type="MarginContainer" parent="MarginContainer/MainVBox/DevicesSection/DevicesPanel" unique_id=297175606]
+[node name="DevicesMargin" type="MarginContainer" parent="MarginContainer/MainVBox/DevicesSection/DevicesPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 4
 theme_override_constants/margin_top = 4
 theme_override_constants/margin_right = 4
 theme_override_constants/margin_bottom = 4
 
-[node name="DeviceList" type="Tree" parent="MarginContainer/MainVBox/DevicesSection/DevicesPanel/DevicesMargin" unique_id=579140723]
+[node name="DeviceList" type="Tree" parent="MarginContainer/MainVBox/DevicesSection/DevicesPanel/DevicesMargin"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 140)
 layout_mode = 2
@@ -119,75 +119,69 @@ theme_override_colors/font_selected_color = Color(1, 1, 1, 1)
 columns = 5
 column_titles_visible = true
 hide_root = true
-select_mode = 0
 
-[node name="ActionRow" type="HBoxContainer" parent="MarginContainer/MainVBox" unique_id=505810227]
+[node name="ActionRow" type="HBoxContainer" parent="MarginContainer/MainVBox"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="DeviceActionButton" type="Button" parent="MarginContainer/MainVBox/ActionRow" unique_id=1925631806]
+[node name="DeviceActionButton" type="Button" parent="MarginContainer/MainVBox/ActionRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 disabled = true
 text = "Select a device"
 
-[node name="UnpairButton" type="Button" parent="MarginContainer/MainVBox/ActionRow" unique_id=1001739998]
+[node name="UnpairButton" type="Button" parent="MarginContainer/MainVBox/ActionRow"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 disabled = true
 text = "Unpair"
 
-[node name="LogSection" type="VBoxContainer" parent="MarginContainer/MainVBox" unique_id=1203016000]
+[node name="LogSection" type="VBoxContainer" parent="MarginContainer/MainVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 size_flags_stretch_ratio = 1.5
 theme_override_constants/separation = 4
 
-[node name="LogHeader" type="Label" parent="MarginContainer/MainVBox/LogSection" unique_id=331039426]
+[node name="LogHeader" type="Label" parent="MarginContainer/MainVBox/LogSection"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "Event Log (select text to copy)"
 
-[node name="LogPanel" type="PanelContainer" parent="MarginContainer/MainVBox/LogSection" unique_id=133203857]
+[node name="LogPanel" type="PanelContainer" parent="MarginContainer/MainVBox/LogSection"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="LogMargin" type="MarginContainer" parent="MarginContainer/MainVBox/LogSection/LogPanel" unique_id=1061705788]
+[node name="LogMargin" type="MarginContainer" parent="MarginContainer/MainVBox/LogSection/LogPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 4
 theme_override_constants/margin_top = 4
 theme_override_constants/margin_right = 4
 theme_override_constants/margin_bottom = 4
 
-[node name="LogOutput" type="TextEdit" parent="MarginContainer/MainVBox/LogSection/LogPanel/LogMargin" unique_id=84882913]
+[node name="LogOutput" type="TextEdit" parent="MarginContainer/MainVBox/LogSection/LogPanel/LogMargin"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 size_flags_vertical = 3
-focus_mode = 2
-mouse_filter = 0
 editable = false
-context_menu_enabled = true
-shortcut_keys_enabled = true
-selecting_enabled = true
 wrap_mode = 1
 scroll_smooth = true
 
-[node name="ToggleAdvancedButton" type="Button" parent="MarginContainer/MainVBox" unique_id=648564399]
+[node name="ToggleAdvancedButton" type="Button" parent="MarginContainer/MainVBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 4
 text = "Show Advanced Log"
 
-[node name="AdvancedPanel" type="PanelContainer" parent="MarginContainer/MainVBox" unique_id=1491597490]
+[node name="AdvancedPanel" type="PanelContainer" parent="MarginContainer/MainVBox"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(0, 148)
 layout_mode = 2
 
-[node name="AdvancedMargin" type="MarginContainer" parent="MarginContainer/MainVBox/AdvancedPanel" unique_id=58718905]
+[node name="AdvancedMargin" type="MarginContainer" parent="MarginContainer/MainVBox/AdvancedPanel"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/margin_left = 10
@@ -195,28 +189,23 @@ theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 8
 
-[node name="AdvancedVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin" unique_id=967693811]
+[node name="AdvancedVBox" type="VBoxContainer" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 4
 
-[node name="AdvancedHeader" type="Label" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox" unique_id=1478252764]
+[node name="AdvancedHeader" type="Label" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 15
 text = "Advanced Log (select text to copy)"
 
-[node name="AdvancedLog" type="TextEdit" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox" unique_id=1103575823]
+[node name="AdvancedLog" type="TextEdit" parent="MarginContainer/MainVBox/AdvancedPanel/AdvancedMargin/AdvancedVBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 110)
 layout_mode = 2
 size_flags_vertical = 3
-focus_mode = 2
-mouse_filter = 0
 theme_override_font_sizes/font_size = 13
 editable = false
-context_menu_enabled = true
-shortcut_keys_enabled = true
-selecting_enabled = true
 wrap_mode = 1
 scroll_smooth = true
 
