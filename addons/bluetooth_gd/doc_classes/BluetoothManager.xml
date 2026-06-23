@@ -1,0 +1,337 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="BluetoothManager" inherits="Node" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/godotengine/godot/master/doc/class.xsd">
+	<brief_description>
+		Cross-platform Bluetooth device discovery, pairing, and connection management.
+	</brief_description>
+	<description>
+		[BluetoothManager] is the main GDExtension node for BluetoothGD. Add it to your scene tree (or register it as an autoload) to scan for devices, pair gamepads and other peripherals, query connection state, and react to platform events through signals.
+		All Bluetooth I/O runs on a background worker thread; results are delivered on the main thread via signals during [method _process].
+		[b]Supported platforms:[/b] Windows (WinRT), Linux (BlueZ). macOS is stubbed.
+		[b]Device dictionary fields[/b] used by [signal device_found], [method get_discovered_devices], and [method get_paired_devices]:
+		[codeblock lang=text]
+		address      — MAC string "AA:BB:CC:DD:EE:FF" when known, otherwise a platform device id
+		name         — Human-readable name from the OS
+		paired       — Whether the device is paired with the system
+		connected    — Whether the device is currently connected
+		trusted      — Whether the device is trusted (Linux)
+		device_class — Inferred class, e.g. "gamepad" or "unknown"
+		device_id    — Platform-specific identifier (Windows AEP id, Linux object path)
+		rssi         — Signal strength in dBm when available (Linux scan)
+		[/codeblock]
+		[b]Scan options[/b] passed to [method start_scan]:
+		[codeblock lang=text]
+		named_only    — bool, hide devices without a friendly name (default false)
+		gamepads_only — bool, only report gamepad-class devices (default false)
+		min_rssi      — int, minimum RSSI threshold (default -127, Linux)
+		timeout_seconds — int, scan timeout hint (default 0)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="start_scan">
+			<return type="void" />
+			<param index="0" name="options" type="Dictionary" default="{}">
+				Optional scan filters. See class description for supported keys.
+			</param>
+			<description>
+				Begins discovering Bluetooth devices. Emits [signal scan_started], then [signal device_found] for each device. Already-known paired devices are included. Call [method stop_scan] to end discovery.
+			</description>
+		</method>
+		<method name="stop_scan">
+			<return type="void" />
+			<description>
+				Stops an active device scan. Emits [signal scan_stopped].
+			</description>
+		</method>
+		<method name="get_discovered_devices">
+			<return type="Array" />
+			<description>
+				Returns an [Array] of device [Dictionary]s discovered during the current session (see class description for fields).
+			</description>
+		</method>
+		<method name="pair_device">
+			<return type="void" />
+			<param index="0" name="address" type="String">
+				Device MAC address or platform identifier from [signal device_found].
+			</param>
+			<description>
+				Starts pairing with the device at [param address]. Emits [signal pairing_started], then [signal pairing_succeeded] or [signal pairing_failed]. Interactive PIN flows emit [signal pairing_pin_requested] or [signal pairing_confirmation_requested]; respond with [method confirm_pairing], [method reject_pairing], or [method cancel_pairing].
+			</description>
+		</method>
+		<method name="pair_device_by_id">
+			<return type="void" />
+			<param index="0" name="device_id" type="String">
+				Platform [code]device_id[/code] from [signal device_found].
+			</param>
+			<description>
+				Pairs using the platform device id instead of a MAC address. Useful for Windows Association Endpoint ids before an address is resolved.
+			</description>
+		</method>
+		<method name="unpair_device">
+			<return type="void" />
+			<param index="0" name="address" type="String">
+				Device MAC address or identifier.
+			</param>
+			<description>
+				Removes the system pairing for [param address]. On Windows, disconnect HID controllers before unpairing. Emits [signal device_removed] on success.
+			</description>
+		</method>
+		<method name="refresh_paired_devices">
+			<return type="void" />
+			<description>
+				Re-queries the OS for paired devices and emits [signal devices_refreshed].
+			</description>
+		</method>
+		<method name="get_paired_devices">
+			<return type="Array" />
+			<description>
+				Returns an [Array] of [Dictionary]s for devices currently paired with the system.
+			</description>
+		</method>
+		<method name="is_paired">
+			<return type="bool" />
+			<param index="0" name="address" type="String">
+				Device MAC address or identifier.
+			</param>
+			<description>
+				Returns [code]true[/code] if [param address] is paired.
+			</description>
+		</method>
+		<method name="connect_device">
+			<return type="void" />
+			<param index="0" name="address" type="String">
+				Device MAC address.
+			</param>
+			<description>
+				Requests a connection to a paired device. HID gamepads often connect automatically once paired and powered on. Emits [signal connection_changed] when state updates.
+			</description>
+		</method>
+		<method name="disconnect_device">
+			<return type="void" />
+			<param index="0" name="address" type="String">
+				Device MAC address.
+			</param>
+			<description>
+				Attempts to disconnect [param address]. Windows cannot force-disconnect Bluetooth HID gamepads; power off the controller or unpair in system settings. Emits [signal connection_changed] with an explanatory [code]message[/code].
+			</description>
+		</method>
+		<method name="is_connected">
+			<return type="bool" />
+			<param index="0" name="address" type="String">
+				Device MAC address or identifier.
+			</param>
+			<description>
+				Returns [code]true[/code] if [param address] is connected. On Windows, HID gamepads are detected via the HID stack as well as classic Bluetooth.
+			</description>
+		</method>
+		<method name="confirm_pairing">
+			<return type="void" />
+			<param index="0" name="pin" type="String" default="&quot;&quot;">
+				PIN to submit when the stack requests one.
+			</param>
+			<description>
+				Accepts an interactive pairing request. Pass [param pin] when [signal pairing_pin_requested] was emitted.
+			</description>
+		</method>
+		<method name="reject_pairing">
+			<return type="void" />
+			<description>
+				Rejects the current interactive pairing request.
+			</description>
+		</method>
+		<method name="cancel_pairing">
+			<return type="void" />
+			<description>
+				Cancels the in-progress pairing ceremony and rejects any pending PIN/confirmation prompt.
+			</description>
+		</method>
+		<method name="normalize_address">
+			<return type="String" />
+			<param index="0" name="address" type="String">
+				Raw address string.
+			</param>
+			<description>
+				Normalizes [param address] to uppercase colon-separated form ([code]AA:BB:CC:DD:EE:FF[/code]).
+			</description>
+		</method>
+		<method name="is_valid_bluetooth_address">
+			<return type="bool" />
+			<param index="0" name="address" type="String">
+				Address string to validate.
+			</param>
+			<description>
+				Returns [code]true[/code] if [param address] is a valid 6-byte Bluetooth MAC.
+			</description>
+		</method>
+		<method name="can_unpair_while_connected">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the current platform allows unpairing while a device is still connected. [code]true[/code] on Windows and Linux; [code]false[/code] on macOS and other stub backends.
+			</description>
+		</method>
+		<method name="is_bluetooth_available">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the native backend initialized successfully.
+			</description>
+		</method>
+		<method name="is_radio_on">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the Bluetooth radio is on. Updated when the backend reports [signal error_occurred] with a radio-off error.
+			</description>
+		</method>
+		<method name="get_platform_name">
+			<return type="String" />
+			<description>
+				Returns the active backend name: [code]"windows"[/code], [code]"linux"[/code], [code]"macos"[/code], or [code]"unknown"[/code].
+			</description>
+		</method>
+		<method name="get_capabilities">
+			<return type="Dictionary" />
+			<description>
+				Returns platform capability flags, including [code]platform[/code], [code]implemented[/code], [code]supports_ble[/code], [code]supports_device_id[/code], [code]supports_rssi[/code] (Linux), [code]can_disconnect_hid[/code], [code]can_unpair_while_connected[/code], and [code]needs_pin_ui[/code].
+			</description>
+		</method>
+		<method name="get_error_code_name">
+			<return type="String" />
+			<param index="0" name="error_code" type="int">
+				Numeric error code from [signal pairing_failed] or [signal error_occurred].
+			</param>
+			<description>
+				Converts an error code to a stable string: [code]none[/code], [code]device_not_found[/code], [code]radio_off[/code], [code]not_supported[/code], [code]pin_required[/code], [code]pairing_rejected[/code], [code]permission_denied[/code], [code]operation_timeout[/code], [code]invalid_address[/code], [code]already_in_progress[/code], or [code]unknown[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+	</members>
+	<signals>
+		<signal name="bluetooth_ready">
+			<description>
+				Emitted once the backend is initialized and the first paired-device snapshot is available.
+			</description>
+		</signal>
+		<signal name="scan_started">
+			<description>
+				Emitted when [method start_scan] begins discovery.
+			</description>
+		</signal>
+		<signal name="scan_stopped">
+			<description>
+				Emitted when [method stop_scan] completes.
+			</description>
+		</signal>
+		<signal name="device_found">
+			<param index="0" name="device_info" type="Dictionary">
+				Device properties; see class description.
+			</param>
+			<description>
+				Emitted when a device is discovered or updated during scan or refresh.
+			</description>
+		</signal>
+		<signal name="device_removed">
+			<param index="0" name="address" type="String">
+				Address or identifier of the removed device.
+			</param>
+			<description>
+				Emitted when a device is unpaired or removed from the system cache.
+			</description>
+		</signal>
+		<signal name="devices_refreshed">
+			<description>
+				Emitted after [method refresh_paired_devices] updates the paired-device list.
+			</description>
+		</signal>
+		<signal name="pairing_started">
+			<param index="0" name="address" type="String">
+				Device being paired.
+			</param>
+			<description>
+				Emitted when a pair operation begins.
+			</description>
+		</signal>
+		<signal name="pairing_succeeded">
+			<param index="0" name="address" type="String">
+				Paired device address.
+			</param>
+			<description>
+				Emitted when pairing completes successfully.
+			</description>
+		</signal>
+		<signal name="pairing_failed">
+			<param index="0" name="address" type="String">
+				Device address.
+			</param>
+			<param index="1" name="error" type="String">
+				Human-readable failure message.
+			</param>
+			<param index="2" name="error_code" type="int">
+				Machine-readable error code; use [method get_error_code_name].
+			</param>
+			<description>
+				Emitted when pairing fails.
+			</description>
+		</signal>
+		<signal name="pairing_confirmation_requested">
+			<param index="0" name="address" type="String">
+				Device address.
+			</param>
+			<param index="1" name="kind" type="String">
+				Confirmation type from the stack.
+			</param>
+			<description>
+				Emitted when the OS asks the user to confirm a pairing code or match. Respond with [method confirm_pairing] or [method reject_pairing].
+			</description>
+		</signal>
+		<signal name="pairing_pin_requested">
+			<param index="0" name="address" type="String">
+				Device address.
+			</param>
+			<description>
+				Emitted when the OS requests a PIN. Call [method confirm_pairing] with the PIN.
+			</description>
+		</signal>
+		<signal name="pairing_display_pin">
+			<param index="0" name="address" type="String">
+				Device address.
+			</param>
+			<param index="1" name="pin" type="String">
+				PIN shown by the remote device.
+			</param>
+			<description>
+				Emitted when the OS displays a PIN for the user to enter on the remote device.
+			</description>
+		</signal>
+		<signal name="connection_changed">
+			<param index="0" name="address" type="String">
+				Device address.
+			</param>
+			<param index="1" name="connected" type="bool">
+				New connection state.
+			</param>
+			<param index="2" name="message" type="String">
+				Optional platform note (e.g. HID disconnect limitations on Windows).
+			</param>
+			<description>
+				Emitted when a device's connection state changes.
+			</description>
+		</signal>
+		<signal name="error_occurred">
+			<param index="0" name="operation" type="String">
+				Operation that failed, e.g. [code]connect_device[/code] or [code]initialize[/code].
+			</param>
+			<param index="1" name="message" type="String">
+				Error details.
+			</param>
+			<param index="2" name="error_code" type="int">
+				Error code; use [method get_error_code_name].
+			</param>
+			<description>
+				Emitted when a backend operation fails.
+			</description>
+		</signal>
+	</signals>
+	<constants>
+	</constants>
+</class>

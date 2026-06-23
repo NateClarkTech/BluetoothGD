@@ -1,0 +1,3 @@
+[gd_scene format=3 uid="uid://d0goqdwslji7p"]
+
+[node name="BluetoothManager" type="BluetoothManager" unique_id=980537654]

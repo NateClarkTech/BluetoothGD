@@ -10,6 +10,8 @@ build*/
 *.exp
 *.lib
 bin/
+!addons/bluetooth_gd/bin/
+!addons/bluetooth_gd/bin/**
 !demo/bluetooth_manager.gdextension
 demo/.godot/
 
@@ -18,3 +20,18 @@ agent-tools/
 terminals/
 mcps/
 
+# Godot 4+ specific ignores
+.godot/
+
+# Godot-specific ignores
+.import/
+export.cfg
+export_presets.cfg
+
+# Imported translations (automatically generated from CSV files)
+*.translation
+
+# Mono-specific ignores
+.mono/
+data_*/
+mono_crash.*.json
