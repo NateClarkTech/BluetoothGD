@@ -12,7 +12,8 @@ build*/
 bin/
 !addons/bluetooth_gd/bin/
 !addons/bluetooth_gd/bin/**
-!demo/bluetooth_manager.gdextension
+!demo/addons/bluetooth_gd/bin/**
+
 demo/.godot/
 
 # Agent tooling (Cursor / Grok)
