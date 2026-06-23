@@ -12,6 +12,7 @@ build*/
 bin/
 !addons/bluetooth_gd/bin/
 !addons/bluetooth_gd/bin/**
+!demo/addons/bluetooth_gd/bin/
 !demo/addons/bluetooth_gd/bin/**
 
 demo/.godot/
