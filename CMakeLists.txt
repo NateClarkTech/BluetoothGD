@@ -152,13 +152,14 @@ if(WIN32)
             PDB_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
         )
 
+        # Release builds may not emit a PDB; skip copy when not building Debug.
         add_custom_command(
             TARGET ${TARGET_NAME}
             POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy
+            COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Debug>,copy,true>
                 "$<TARGET_PDB_FILE:${TARGET_NAME}>"
                 "${ADDONS_BIN_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy
+            COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Debug>,copy,true>
                 "$<TARGET_PDB_FILE:${TARGET_NAME}>"
                 "${DEMO_ADDONS_BIN_DIR}/"
         )
