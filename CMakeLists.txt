@@ -126,10 +126,10 @@ set_target_properties(
 add_custom_command(
     TARGET ${TARGET_NAME}
     POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    COMMAND ${CMAKE_COMMAND} -E copy
         "$<TARGET_FILE:${TARGET_NAME}>"
         "${ADDONS_BIN_DIR}/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    COMMAND ${CMAKE_COMMAND} -E copy
         "$<TARGET_FILE:${TARGET_NAME}>"
         "${DEMO_ADDONS_BIN_DIR}/"
 )
@@ -155,10 +155,10 @@ if(WIN32)
         add_custom_command(
             TARGET ${TARGET_NAME}
             POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            COMMAND ${CMAKE_COMMAND} -E copy
                 "$<TARGET_PDB_FILE:${TARGET_NAME}>"
                 "${ADDONS_BIN_DIR}/"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            COMMAND ${CMAKE_COMMAND} -E copy
                 "$<TARGET_PDB_FILE:${TARGET_NAME}>"
                 "${DEMO_ADDONS_BIN_DIR}/"
         )

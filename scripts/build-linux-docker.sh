@@ -115,12 +115,41 @@ docker run --rm \
 			-DGODOTCPP_TARGET=template_debug
 		cmake --build build/debug -j"$(nproc)"
 
-		RELEASE_SO="addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_release.x86_64.so"
-		DEBUG_SO="addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_debug.x86_64.so"
+		RELEASE_NAME="libbluetooth_manager.linux.template_release.x86_64.so"
+		DEBUG_NAME="libbluetooth_manager.linux.template_debug.x86_64.so"
+		ADDON_BIN="addons/bluetooth_gd/bin"
+		DEMO_BIN="demo/addons/bluetooth_gd/bin"
+
+		echo "=== Syncing binaries to addon and demo bin/ ==="
+		copy_to_both() {
+			local src="$1"
+			local name="$2"
+			if [[ ! -f "${src}" ]]; then
+				echo "ERROR: missing build output ${src}"
+				exit 1
+			fi
+			cp -f "${src}" "${ADDON_BIN}/${name}"
+			cp -f "${src}" "${DEMO_BIN}/${name}"
+			chmod +x "${ADDON_BIN}/${name}" "${DEMO_BIN}/${name}"
+		}
+		copy_to_both "build/release/bin/${RELEASE_NAME}" "${RELEASE_NAME}"
+		copy_to_both "build/debug/bin/${DEBUG_NAME}" "${DEBUG_NAME}"
 
 		echo "=== Build finished ==="
-		ls -lh "${RELEASE_SO}" "${DEBUG_SO}"
+		ls -lh "${ADDON_BIN}/${RELEASE_NAME}" "${ADDON_BIN}/${DEBUG_NAME}"
+		ls -lh "${DEMO_BIN}/${RELEASE_NAME}" "${DEMO_BIN}/${DEBUG_NAME}"
 
-		echo "=== Minimum GLIBC (release) ==="
-		objdump -T "${RELEASE_SO}" | grep GLIBC | sed "s/.*GLIBC_/GLIBC_/" | sort -Vu
+		echo "=== Verifying addon and demo binaries match ==="
+		for name in "${RELEASE_NAME}" "${DEBUG_NAME}"; do
+			addon_sum="$(md5sum "${ADDON_BIN}/${name}" | awk "{print \$1}")"
+			demo_sum="$(md5sum "${DEMO_BIN}/${name}" | awk "{print \$1}")"
+			if [[ "${addon_sum}" != "${demo_sum}" ]]; then
+				echo "ERROR: checksum mismatch for ${name}"
+				exit 1
+			fi
+			echo "${name}: OK (${addon_sum})"
+		done
+
+		echo "=== Minimum GLIBC (release, addon) ==="
+		objdump -T "${ADDON_BIN}/${RELEASE_NAME}" | grep -oE "GLIBC_[0-9.]+" | sort -Vu
 	'
