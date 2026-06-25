@@ -93,8 +93,6 @@ Invoke-CMakePreset -PresetName 'debug'
 
 $ReleaseDll = 'libbluetooth_manager.windows.template_release.x86_64.dll'
 $DebugDll = 'libbluetooth_manager.windows.template_debug.x86_64.dll'
-$ReleasePdb = 'libbluetooth_manager.windows.template_release.x86_64.pdb'
-$DebugPdb = 'libbluetooth_manager.windows.template_debug.x86_64.pdb'
 
 function Copy-ToBoth {
 	param(
@@ -113,15 +111,6 @@ function Copy-ToBoth {
 Write-Host '=== Syncing binaries to addon and demo bin/ ==='
 Copy-ToBoth -Source (Join-Path $ReleaseDir "bin/$ReleaseDll") -Name $ReleaseDll
 Copy-ToBoth -Source (Join-Path $DebugDir "bin/$DebugDll") -Name $DebugDll
-
-$releasePdbPath = Join-Path $ReleaseDir "bin/$ReleasePdb"
-$debugPdbPath = Join-Path $DebugDir "bin/$DebugPdb"
-if (Test-Path $releasePdbPath) {
-	Copy-ToBoth -Source $releasePdbPath -Name $ReleasePdb
-}
-if (Test-Path $debugPdbPath) {
-	Copy-ToBoth -Source $debugPdbPath -Name $DebugPdb
-}
 
 Write-Host '=== Build finished ==='
 Get-Item (Join-Path $AddonBin $ReleaseDll), (Join-Path $AddonBin $DebugDll) |
