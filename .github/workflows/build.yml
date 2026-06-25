@@ -30,7 +30,7 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_TARGET=template_debug
 
       - name: Build extension
         run: cmake --build build --target bluetooth_manager --parallel ${{ env.CMAKE_BUILD_PARALLEL_LEVEL }}
@@ -41,11 +41,14 @@ jobs:
       - name: Run unit tests
         run: ./build/tests/bluetooth_manager_tests
 
+      - name: Verify extension output
+        run: ls -lh demo/addons/bluetooth_gd/bin/libbluetooth_manager.*.so
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: bluetooth_manager-linux-debug
-          path: demo/bin/libbluetooth_manager.*.so
+          path: demo/addons/bluetooth_gd/bin/libbluetooth_manager.*.so
           if-no-files-found: error
 
   build-windows:
@@ -57,7 +60,7 @@ jobs:
           submodules: recursive
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_TARGET=template_debug
 
       - name: Build extension
         run: cmake --build build --config Debug --target bluetooth_manager --parallel ${{ env.CMAKE_BUILD_PARALLEL_LEVEL }}
@@ -68,9 +71,12 @@ jobs:
       - name: Run unit tests
         run: ./build/tests/Debug/bluetooth_manager_tests.exe
 
+      - name: Verify extension output
+        run: Get-ChildItem demo/addons/bluetooth_gd/bin/libbluetooth_manager.*.dll
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: bluetooth_manager-windows-debug
-          path: demo/bin/libbluetooth_manager.*.dll
+          path: demo/addons/bluetooth_gd/bin/libbluetooth_manager.*.dll
           if-no-files-found: error
