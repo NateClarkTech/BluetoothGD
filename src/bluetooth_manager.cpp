@@ -445,6 +445,7 @@ Dictionary BluetoothManager::get_capabilities() const {
 	Dictionary caps = worker.get_capabilities();
 	if (caps.is_empty()) {
 		caps["platform"] = get_platform_name();
+		caps["implemented"] = backend_available;
 #if defined(_WIN32)
 		caps["implemented"] = true;
 		caps["can_disconnect_hid"] = false;
@@ -453,7 +454,7 @@ Dictionary BluetoothManager::get_capabilities() const {
 		caps["supports_ble"] = true;
 		caps["supports_device_id"] = true;
 #elif defined(__linux__)
-		caps["implemented"] = true;
+		caps["requires_libdbus"] = true;
 		caps["can_disconnect_hid"] = false;
 		caps["can_unpair_while_connected"] = true;
 		caps["needs_pin_ui"] = true;

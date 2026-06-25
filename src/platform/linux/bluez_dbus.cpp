@@ -1,5 +1,7 @@
 #include "bluez_dbus.h"
 
+#include "dbus_loader.h"
+
 namespace bluetooth {
 
 namespace {
@@ -32,6 +34,12 @@ BluezDBus::~BluezDBus() {
 bool BluezDBus::connect() {
 	if (connection != nullptr) {
 		return true;
+	}
+
+	godot::String loader_error;
+	if (!ensure_dbus_library_loaded(&loader_error)) {
+		last_error = loader_error;
+		return false;
 	}
 
 	static bool threads_initialized = false;

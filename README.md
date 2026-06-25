@@ -25,6 +25,7 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 
 - **Windows HID disconnect:** `disconnect_device()` cannot force-disconnect Bluetooth HID gamepads. Power off the controller or remove the device in Windows Bluetooth settings for a full disconnect.
 - **Linux HID disconnect:** `disconnect_device()` may not keep Bluetooth HID gamepads disconnected if they reconnect when powered on.
+- **Linux missing libdbus:** The extension loads without a hard `libdbus` dependency, but Bluetooth stays unavailable until `libdbus-1` is installed.
 - **macOS:** Backend compiles but returns "not implemented" errors at runtime (see [Supported platforms](#supported-platforms)).
 - **Mobile:** Not implemented yet; see platform table below.
 
@@ -33,7 +34,7 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 | Platform | Status | Backend | Notes |
 |----------|--------|---------|-------|
 | **Windows 10/11** (x86_64) | **Supported** | WinRT | Primary development target. Tested with Godot 4.7. |
-| **Linux** (x86_64) | **Supported** | BlueZ / D-Bus | Requires `bluetoothd`, powered adapter, and BlueZ D-Bus permissions (`bluetooth` group or polkit). |
+| **Linux** (x86_64) | **Supported** | BlueZ / D-Bus | Requires `bluetoothd`, `libdbus-1` at runtime, powered adapter, and BlueZ D-Bus permissions (`bluetooth` group or polkit). Missing `libdbus-1` degrades gracefully (`is_bluetooth_available()` → `false`). |
 | **macOS** (universal) | Stub | IOBluetooth | Milestone 3. Framework linked; operations emit not-implemented errors. |
 | **Android** | Planned | Android Bluetooth API | Milestone 4. Requires runtime permissions (`BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN`, location on older API levels) and export plugin integration. Classic pairing availability varies by device and Android version. |
 | **iOS** | Planned | Core Bluetooth / External Accessory | Milestone 5. iOS restricts third-party Classic Bluetooth access; gamepad pairing may require MFi / system UI flows. BLE-centric workflows are more feasible than full Classic pairing. |
@@ -45,7 +46,7 @@ Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at 
 ## Requirements
 
 - [Godot 4.4+](https://godotengine.org/) (demo tested on 4.4 and 4.7)
-- [CMake](https://cmake.org/) 3.17+
+- [CMake](https://cmake.org/) 3.17+ (3.23+ for [CMake presets](CMakePresets.json))
 - C++17 compiler (C++20 on Windows for WinRT coroutines)
 - Git with submodules
 
@@ -56,8 +57,11 @@ Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at 
 
 ### Linux build tools
 
-- `libdbus-1-dev`
+- `libdbus-1-dev` (headers/pkg-config at **build** time only — `libdbus-1` is loaded at runtime via `dlopen`, not linked as `DT_NEEDED`)
+- `pkg-config`, Ninja (recommended), and a C++17 compiler
+- [Docker](https://docs.docker.com/) (optional — recommended for shipping prebuilt `.so` files via `scripts/build-linux-docker.sh`)
 - `bluez` (runtime — `bluetoothd` must be running)
+- `libdbus-1-3` / `dbus-libs` (runtime — if missing, the extension still loads but `is_bluetooth_available()` returns `false`)
 - User in the `bluetooth` group (or equivalent polkit rights) for pair/connect operations
 
 ### macOS build tools (stub backend)
@@ -76,21 +80,101 @@ git submodule update --init --recursive
 
 ### 2. Build the extension
 
+Successful builds copy native libraries into **both**:
+
+- `addons/bluetooth_gd/bin/` — distributable addon
+- `demo/addons/bluetooth_gd/bin/` — demo project
+
+Ship **both** variants when distributing the addon:
+
+| Variant | Use |
+|---------|-----|
+| `template_debug` | Godot editor |
+| `template_release` | Exported / release builds |
+
+Output names must match `bluetooth_manager.gdextension` (for example `libbluetooth_manager.linux.template_release.x86_64.so`).
+
+Close Godot before rebuilding — the editor locks native libraries on Windows.
+
+#### Linux prebuilt binaries (recommended for shipping)
+
+Use the Docker helper to build on **Ubuntu 20.04** with GCC 9. This avoids accidentally linking against newer glibc/libstdc++ symbols from a bleeding-edge host.
+
 ```bash
-cmake -S . -B build
-cmake --build build --config Debug
+./scripts/build-linux-docker.sh
 ```
 
-On Windows with Visual Studio:
+The script:
+
+- Initializes `godot-cpp` on the **host** (before Docker)
+- Builds **Release** and **Debug** inside `ubuntu:20.04`
+- Installs CMake from Kitware (Ubuntu 20.04's CMake 3.16 is too old)
+- Sets `GODOTCPP_TARGET` to match each build type
+- Prints `GLIBC_*` symbols from the release `.so`
+
+On **openSUSE / Fedora** with SELinux enforcing, the script auto-applies the `:Z` volume label. If `/src` is empty inside the container:
+
+```bash
+export DOCKER_VOLUME_OPTS=Z
+./scripts/build-linux-docker.sh
+```
+
+**Prebuilt Linux runtime requirements** (current 20.04 Docker build):
+
+| Dependency | Notes |
+|------------|-------|
+| glibc | Symbols up to **GLIBC_2.14** |
+| libstdc++.so.6 | Symbols up to **GLIBCXX_3.4.22** |
+| libdbus-1.so.3 | Loaded at runtime via `dlopen` — not a hard `DT_NEEDED` dependency |
+| BlueZ | `bluetoothd` running; D-Bus permissions for pair/connect |
+
+If `libdbus-1` is missing, the extension still loads but `is_bluetooth_available()` returns `false` and `error_occurred` reports `not_supported`.
+
+Verify symbol requirements after any Linux build:
+
+```bash
+SO=addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_release.x86_64.so
+objdump -T "$SO" | grep -oE 'GLIBC_[0-9.]+'   | sort -Vu | tail -1
+objdump -T "$SO" | grep -oE 'GLIBCXX_[0-9.]+' | sort -Vu | tail -1
+ldd "$SO" | grep dbus   # should print nothing
+```
+
+Build on an older base image yourself if you need to target an even older distro.
+
+#### Local build (development)
+
+Requires **CMake 3.17+** (presets need **3.23+**). Always set `GODOTCPP_TARGET` to match the build type.
+
+**CMake presets** ([CMakePresets.json](CMakePresets.json)):
+
+```bash
+cmake --preset debug
+cmake --build --preset debug
+
+cmake --preset release
+cmake --build --preset release
+```
+
+**Manual configure:**
+
+```bash
+# Debug (editor)
+cmake -S . -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug -DGODOTCPP_TARGET=template_debug
+cmake --build build/debug
+
+# Release (export)
+cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DGODOTCPP_TARGET=template_release
+cmake --build build/release
+```
+
+**Windows (Visual Studio):** set `GODOTCPP_TARGET` at configure time — use separate build directories for debug and release:
 
 ```powershell
-cmake -S . -B build
-cmake --build build --config Debug
+cmake -S . -B build-debug   -DGODOTCPP_TARGET=template_debug
+cmake -S . -B build-release -DGODOTCPP_TARGET=template_release
+cmake --build build-debug   --config Debug
+cmake --build build-release --config Release
 ```
-
-Built libraries are copied to `demo/bin/` (for example `libbluetooth_manager.windows.template_debug.x86_64.dll`).
-
-Close Godot before rebuilding — the editor locks the DLL on Windows.
 
 ### 3. Run the demo
 
@@ -98,41 +182,47 @@ Close Godot before rebuilding — the editor locks the DLL on Windows.
 2. Press **F5** to run `scenes/controller_pairing.tscn`.
 3. Use **Start Scan** to discover devices, select one, then **Pair Device** / **Connect** / **Disconnect** as appropriate.
 
-The demo autoloads `Bluetooth` from `scenes/bluetooth_manager.tscn`. The GDExtension manifest lives at `demo/bluetooth_manager.gdextension`.
+The demo autoloads `Bluetooth` from `scenes/bluetooth_manager.tscn`. The GDExtension manifest lives at `demo/addons/bluetooth_gd/bluetooth_manager.gdextension`.
 
 ## Project layout
 
 ```
 BluetoothGD/
+├── addons/bluetooth_gd/    # Godot addon (copy into your project)
+│   ├── bluetooth_manager.gdextension
+│   ├── bin/                # Compiled native libraries (post-build copy target)
+│   ├── doc_classes/        # Editor class docs
+│   └── example/            # Example autoload scene
 ├── src/                    # GDExtension C++ source
 │   ├── bluetooth_manager.* # Godot Node API
 │   ├── backend/            # Command/event bridge
 │   ├── threading/          # Worker thread + queues
 │   └── platform/           # Per-OS backends
 │       ├── windows/        # WinRT (fully implemented)
-│       ├── linux/          # BlueZ / D-Bus
+│       ├── linux/          # BlueZ / D-Bus (+ dbus_loader)
 │       └── macos/          # IOBluetooth stub
 ├── demo/                   # Godot demo project
-│   ├── bluetooth_manager.gdextension
-│   ├── bin/                # Compiled native libraries (gitignored)
+│   ├── addons/bluetooth_gd/  # Same addon layout; bin/ receives post-build copy
 │   └── scenes/             # Demo UI + autoload scene
-├── doc_classes/            # Editor API docs (BluetoothManager.xml)
+├── doc_classes/            # Source XML for BluetoothManager editor docs
 ├── tests/                  # Native unit tests (device info helpers)
-├── cmake/                  # Build helpers (doc generation)
+├── cmake/                  # Build helpers (doc generation, API pin)
+├── scripts/                # build-linux-docker.sh (Ubuntu 20.04 container build)
 ├── godot-cpp/              # Godot C++ bindings (submodule, 4.4 branch)
-└── CMakeLists.txt
+├── CMakeLists.txt
+└── CMakePresets.json       # debug / release Ninja presets
 ```
 
 ## Using in your project
 
-### 1. Copy extension artifacts
+### 1. Copy the addon
 
-Copy into your Godot project:
+Copy the entire `addons/bluetooth_gd/` folder into your Godot project's `addons/` directory. It should contain:
 
 - `bluetooth_manager.gdextension`
-- `bin/libbluetooth_manager.<platform>.<template>.<arch>.<ext>`
+- `bin/libbluetooth_manager.<platform>.<template>.<arch>.<ext>` (build all variants you need — debug for editor, release for exported builds)
 
-Adjust library paths in the `.gdextension` file if your `bin/` location differs.
+If you build from source, run CMake first so `addons/bluetooth_gd/bin/` is populated. Adjust library paths in the `.gdextension` file only if you relocate `bin/`.
 
 ### 2. Add a BluetoothManager node
 
@@ -153,7 +243,8 @@ func _ready() -> void:
     Bluetooth.error_occurred.connect(_on_error_occurred)
 
 func _on_bluetooth_ready() -> void:
-    # Backend initialized and first paired-device sync completed.
+    if not Bluetooth.is_bluetooth_available():
+        return  # e.g. missing libdbus on Linux
     pass
 
 func _on_start_scan() -> void:
@@ -251,7 +342,9 @@ The demo applies its **Named devices only** filter in the UI layer (via `DeviceL
 | Key | Description |
 |-----|-------------|
 | `platform` | Same as `get_platform_name()` |
-| `implemented` | Whether the backend is fully implemented |
+| `implemented` | Whether the backend initialized successfully |
+| `requires_libdbus` | Linux only — D-Bus client library is required at runtime |
+| `dbus_available` | Linux only — whether `libdbus-1` was loaded |
 | `supports_ble` | BLE discovery support |
 | `supports_device_id` | `pair_device_by_id()` and `device_id` fields are usable |
 | `supports_rssi` | RSSI available during scan (Linux) |

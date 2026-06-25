@@ -1,6 +1,7 @@
 #include "linux_backend.h"
 
 #include "../../backend/bluetooth_error.h"
+#include "dbus_loader.h"
 
 #include <functional>
 
@@ -40,6 +41,9 @@ BluetoothErrorCode infer_error_code(const godot::String &p_message) {
 	}
 	if (lower.contains("powered") || lower.contains("radio off")) {
 		return BluetoothErrorCode::RADIO_OFF;
+	}
+	if (lower.contains("libdbus") || lower.contains("dbus-1")) {
+		return BluetoothErrorCode::NOT_SUPPORTED;
 	}
 	if (lower.contains("not supported")) {
 		return BluetoothErrorCode::NOT_SUPPORTED;
@@ -461,7 +465,11 @@ bool LinuxBackend::initialize() {
 	}
 
 	if (!dbus.connect()) {
-		emit_error("initialize", "initialize failed: " + dbus.get_last_error());
+		const godot::String &err = dbus.get_last_error();
+		const BluetoothErrorCode code = err.contains("libdbus")
+				? BluetoothErrorCode::NOT_SUPPORTED
+				: BluetoothErrorCode::UNKNOWN;
+		emit_error("initialize", "initialize failed: " + err, code);
 		return false;
 	}
 
@@ -928,7 +936,9 @@ bool LinuxBackend::is_radio_on() const {
 godot::Dictionary LinuxBackend::get_capabilities() const {
 	godot::Dictionary caps;
 	caps["platform"] = "linux";
-	caps["implemented"] = true;
+	caps["implemented"] = initialized;
+	caps["dbus_available"] = is_dbus_library_loaded();
+	caps["requires_libdbus"] = true;
 	caps["supports_ble"] = true;
 	caps["supports_device_id"] = true;
 	caps["supports_rssi"] = true;

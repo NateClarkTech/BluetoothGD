@@ -16,6 +16,7 @@ find_package(Python3 3.4 REQUIRED COMPONENTS Interpreter)
 if(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(DBUS REQUIRED dbus-1)
+    find_package(Threads REQUIRED)
 endif()
 
 # godot-cpp 4.4 ships a 4.4.1 API; pin bindings to 4.4.0 so the DLL loads on Godot 4.4.stable.
@@ -61,6 +62,8 @@ elseif(UNIX)
         src/platform/linux/bluez_agent.h
         src/platform/linux/bluez_dbus.cpp
         src/platform/linux/bluez_dbus.h
+        src/platform/linux/dbus_loader.cpp
+        src/platform/linux/dbus_loader.h
         src/platform/linux/linux_backend.cpp
         src/platform/linux/linux_backend.h
     )
@@ -96,7 +99,18 @@ target_link_libraries(${TARGET_NAME} PRIVATE godot-cpp)
 
 get_target_property(GODOTCPP_SUFFIX godot-cpp GODOTCPP_SUFFIX)
 
-set(OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/demo/bin/")
+set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/bin")
+
+set(ADDONS_BIN_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/bluetooth_gd/bin"
+)
+
+set(DEMO_ADDONS_BIN_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/demo/addons/bluetooth_gd/bin"
+)
+
+file(MAKE_DIRECTORY "${ADDONS_BIN_DIR}")
+file(MAKE_DIRECTORY "${DEMO_ADDONS_BIN_DIR}")
 
 set_target_properties(
     ${TARGET_NAME}
@@ -109,12 +123,23 @@ set_target_properties(
         OUTPUT_NAME "bluetooth_manager${GODOTCPP_SUFFIX}"
 )
 
+add_custom_command(
+    TARGET ${TARGET_NAME}
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:${TARGET_NAME}>"
+        "${ADDONS_BIN_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:${TARGET_NAME}>"
+        "${DEMO_ADDONS_BIN_DIR}/"
+)
+
 if(WIN32)
     target_link_libraries(${TARGET_NAME} PRIVATE windowsapp)
     target_compile_definitions(${TARGET_NAME} PRIVATE _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
     target_compile_options(${TARGET_NAME} PRIVATE /EHsc /std:c++20)
+
     if(MSVC)
-        # MSVC multi-config generators append /Debug or /Release to output dirs by default.
         foreach(CONFIG DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
             string(TOUPPER ${CONFIG} CONFIG_UPPER)
             set_target_properties(${TARGET_NAME} PROPERTIES
@@ -122,10 +147,23 @@ if(WIN32)
                 LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} "${OUTPUT_DIR}"
             )
         endforeach()
+
         set_target_properties(${TARGET_NAME} PROPERTIES
             PDB_OUTPUT_DIRECTORY "${OUTPUT_DIR}"
         )
+
+        add_custom_command(
+            TARGET ${TARGET_NAME}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_PDB_FILE:${TARGET_NAME}>"
+                "${ADDONS_BIN_DIR}/"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_PDB_FILE:${TARGET_NAME}>"
+                "${DEMO_ADDONS_BIN_DIR}/"
+        )
     endif()
+
 elseif(APPLE)
     set_target_properties(
         ${TARGET_NAME}
@@ -133,17 +171,27 @@ elseif(APPLE)
             SUFFIX ""
             OUTPUT_NAME "bluetooth_manager${GODOTCPP_SUFFIX}"
     )
+
     target_link_libraries(${TARGET_NAME} PRIVATE
         "-framework IOBluetooth"
         "-framework Foundation"
     )
+
 elseif(UNIX)
     target_include_directories(${TARGET_NAME} PRIVATE ${DBUS_INCLUDE_DIRS})
-    target_link_libraries(${TARGET_NAME} PRIVATE ${DBUS_LIBRARIES})
+    # libdbus is loaded at runtime via dlopen (see dbus_loader.cpp). D-Bus symbols stay
+    # undefined at link time so libdbus is not a DT_NEEDED dependency of the extension.
+    target_link_libraries(${TARGET_NAME} PRIVATE dl Threads::Threads)
+    target_link_options(${TARGET_NAME} PRIVATE
+        "-Wl,--unresolved-symbols=ignore-all"
+    )
 endif()
 
 add_executable(bluetooth_manager_tests tests/test_device_info.cpp)
-set_target_properties(bluetooth_manager_tests PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests"
-    CXX_STANDARD 17
+
+set_target_properties(
+    bluetooth_manager_tests
+    PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests"
+        CXX_STANDARD 17
 )
