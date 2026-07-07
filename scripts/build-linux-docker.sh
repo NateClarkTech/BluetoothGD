@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Build Linux x86_64 GDExtension libraries inside Ubuntu 20.04 for broad glibc
-# compatibility (glibc ~2.31). Copies artifacts to addons/bluetooth_gd/bin/ and
-# demo/addons/bluetooth_gd/bin/ via CMake POST_BUILD.
+# Build Linux x86_64 GDExtension libraries inside Ubuntu 20.04 (focal) for broad
+# glibc compatibility. Copies artifacts to addons/bluetooth_gd/bin/ and
+# demo/addons/bluetooth_gd/bin/.
+#
+# The extension must link libdbus-1.so.3 at build time (DT_NEEDED). Godot loads
+# native libraries with RTLD_NOW; unresolved D-Bus symbols cause a hard load failure.
 #
 # Usage (from repository root):
 #   ./scripts/build-linux-docker.sh
@@ -9,7 +12,7 @@
 # Requires: Docker
 #
 # Note: Ubuntu 20.04 ships CMake 3.16; this script installs CMake from Kitware APT
-# (focal) then uses explicit -S/-B paths (build/release, build/debug).
+# (focal) then uses explicit -S/-B paths (docker-build/release, docker-build/debug).
 #
 # SELinux (openSUSE / Fedora): relabels the repo mount with :Z when enforcing.
 # Override with: export DOCKER_VOLUME_OPTS=z   (shared label)
@@ -18,6 +21,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UBUNTU_IMAGE="${BLUETOOTHGD_DOCKER_IMAGE:-ubuntu:20.04}"
 
 if [[ ! -f "${ROOT}/CMakeLists.txt" ]]; then
 	echo "ERROR: ${ROOT}/CMakeLists.txt not found. Run this script from the repository."
@@ -33,6 +37,7 @@ fi
 DOCKER_VOLUME_OPTS="${DOCKER_VOLUME_OPTS:-}"
 
 echo "=== Repository: ${ROOT} ==="
+echo "=== Docker image: ${UBUNTU_IMAGE} ==="
 if [[ -n "${DOCKER_VOLUME_OPTS}" ]]; then
 	echo "=== Docker volume option: :${DOCKER_VOLUME_OPTS} ==="
 fi
@@ -60,7 +65,7 @@ fi
 docker run --rm \
 	-v "${VOLUME_MOUNT}" \
 	-w /src \
-	ubuntu:20.04 \
+	"${UBUNTU_IMAGE}" \
 	bash -c '
 		set -euo pipefail
 
@@ -80,6 +85,7 @@ docker run --rm \
 
 		apt-get update
 		apt-get install -y \
+			binutils \
 			build-essential \
 			ca-certificates \
 			gnupg \
@@ -88,6 +94,7 @@ docker run --rm \
 			ninja-build \
 			python3 \
 			pkg-config \
+			libdbus-1-3 \
 			libdbus-1-dev
 
 		# Ubuntu 20.04 ships CMake 3.16; this project requires 3.17+.
@@ -99,20 +106,31 @@ docker run --rm \
 		apt-get install -y --no-install-recommends cmake
 
 		echo "=== CMake $(cmake --version | head -1) ==="
+		echo "=== pkg-config dbus-1: $(pkg-config --modversion dbus-1) ==="
 
 		# Use docker-build/ (not build/) so a prior root-owned Docker run cannot block writes.
 		rm -rf docker-build/release docker-build/debug
 
+		configure_build() {
+			local build_dir="$1"
+			local build_type="$2"
+			local godot_target="$3"
+			echo "=== Configure ${build_type} (${godot_target}) ==="
+			cmake -S . -B "${build_dir}" -G Ninja \
+				-DCMAKE_BUILD_TYPE="${build_type}" \
+				-DGODOTCPP_TARGET="${godot_target}"
+			if ! grep -qE "DBUS_FOUND:(INTERNAL=1|BOOL=TRUE)" "${build_dir}/CMakeCache.txt"; then
+				echo "ERROR: CMake did not find dbus-1 in ${build_dir}."
+				exit 1
+			fi
+		}
+
 		echo "=== Release build ==="
-		cmake -S . -B docker-build/release -G Ninja \
-			-DCMAKE_BUILD_TYPE=Release \
-			-DGODOTCPP_TARGET=template_release
+		configure_build docker-build/release Release template_release
 		cmake --build docker-build/release -j"$(nproc)"
 
 		echo "=== Debug build ==="
-		cmake -S . -B docker-build/debug -G Ninja \
-			-DCMAKE_BUILD_TYPE=Debug \
-			-DGODOTCPP_TARGET=template_debug
+		configure_build docker-build/debug Debug template_debug
 		cmake --build docker-build/debug -j"$(nproc)"
 
 		RELEASE_NAME="libbluetooth_manager.linux.template_release.x86_64.so"
@@ -120,7 +138,8 @@ docker run --rm \
 		ADDON_BIN="addons/bluetooth_gd/bin"
 		DEMO_BIN="demo/addons/bluetooth_gd/bin"
 
-		echo "=== Syncing binaries to addon and demo bin/ ==="
+		mkdir -p "${ADDON_BIN}" "${DEMO_BIN}"
+
 		copy_to_both() {
 			local src="$1"
 			local name="$2"
@@ -132,8 +151,50 @@ docker run --rm \
 			cp -f "${src}" "${DEMO_BIN}/${name}"
 			chmod +x "${ADDON_BIN}/${name}" "${DEMO_BIN}/${name}"
 		}
+
+		echo "=== Syncing binaries to addon and demo bin/ ==="
 		copy_to_both "docker-build/release/bin/${RELEASE_NAME}" "${RELEASE_NAME}"
 		copy_to_both "docker-build/debug/bin/${DEBUG_NAME}" "${DEBUG_NAME}"
+
+		verify_extension_so() {
+			local so_path="$1"
+			local label="$2"
+
+			echo "=== Verify ${label}: ${so_path} ==="
+
+			if ! readelf -d "${so_path}" | grep -q "Shared library: \[libdbus-1.so.3\]"; then
+				echo "ERROR: ${so_path} does not list libdbus-1.so.3 in DT_NEEDED."
+				echo "       Godot cannot load the GDExtension (undefined D-Bus symbols)."
+				readelf -d "${so_path}" | grep NEEDED || true
+				exit 1
+			fi
+
+			if ! ldd "${so_path}" | grep -q "libdbus-1.so.3 =>"; then
+				echo "ERROR: ${so_path} cannot resolve libdbus-1.so.3 at load time."
+				ldd "${so_path}" || true
+				exit 1
+			fi
+
+			# Mimic Godot dlopen(RTLD_NOW): fail if any symbol is still unresolved.
+			python3 - "${so_path}" <<'"'"'PY'"'"'
+import ctypes
+import os
+import sys
+
+so_path = sys.argv[1]
+rtld_now = getattr(os, "RTLD_NOW", getattr(ctypes, "RTLD_NOW", 0x2))
+ctypes.CDLL(so_path, mode=rtld_now)
+print(f"dlopen(RTLD_NOW) OK: {so_path}")
+PY
+
+			local max_glibc max_glibcxx
+			max_glibc="$(objdump -T "${so_path}" | grep -oE "GLIBC_[0-9.]+" | sort -Vu | tail -1)"
+			max_glibcxx="$(objdump -T "${so_path}" | grep -oE "GLIBCXX_[0-9.]+" | sort -Vu | tail -1)"
+			echo "  libdbus DT_NEEDED: OK"
+			echo "  dlopen(RTLD_NOW): OK"
+			echo "  max GLIBC symbol: ${max_glibc:-unknown}"
+			echo "  max GLIBCXX symbol: ${max_glibcxx:-unknown}"
+		}
 
 		echo "=== Build finished ==="
 		ls -lh "${ADDON_BIN}/${RELEASE_NAME}" "${ADDON_BIN}/${DEBUG_NAME}"
@@ -150,6 +211,21 @@ docker run --rm \
 			echo "${name}: OK (${addon_sum})"
 		done
 
-		echo "=== Minimum GLIBC (release, addon) ==="
+		verify_extension_so "${ADDON_BIN}/${RELEASE_NAME}" "release addon"
+		verify_extension_so "${ADDON_BIN}/${DEBUG_NAME}" "debug addon"
+
+		echo "=== GLIBC symbols (release, addon) ==="
 		objdump -T "${ADDON_BIN}/${RELEASE_NAME}" | grep -oE "GLIBC_[0-9.]+" | sort -Vu
 	'
+
+# Docker runs as root; restore ownership so the host user can edit/commit artifacts.
+if command -v chown >/dev/null 2>&1; then
+	chown -R "$(id -u):$(id -g)" \
+		"${ROOT}/addons/bluetooth_gd/bin" \
+		"${ROOT}/demo/addons/bluetooth_gd/bin" \
+		"${ROOT}/docker-build" 2>/dev/null || true
+fi
+
+echo "=== Docker Linux build complete ==="
+echo "Binaries:"
+ls -lh "${ROOT}/addons/bluetooth_gd/bin"/libbluetooth_manager.linux.*.x86_64.so
