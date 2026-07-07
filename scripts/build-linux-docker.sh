@@ -156,46 +156,6 @@ docker run --rm \
 		copy_to_both "docker-build/release/bin/${RELEASE_NAME}" "${RELEASE_NAME}"
 		copy_to_both "docker-build/debug/bin/${DEBUG_NAME}" "${DEBUG_NAME}"
 
-		verify_extension_so() {
-			local so_path="$1"
-			local label="$2"
-
-			echo "=== Verify ${label}: ${so_path} ==="
-
-			if ! readelf -d "${so_path}" | grep -q "Shared library: \[libdbus-1.so.3\]"; then
-				echo "ERROR: ${so_path} does not list libdbus-1.so.3 in DT_NEEDED."
-				echo "       Godot cannot load the GDExtension (undefined D-Bus symbols)."
-				readelf -d "${so_path}" | grep NEEDED || true
-				exit 1
-			fi
-
-			if ! ldd "${so_path}" | grep -q "libdbus-1.so.3 =>"; then
-				echo "ERROR: ${so_path} cannot resolve libdbus-1.so.3 at load time."
-				ldd "${so_path}" || true
-				exit 1
-			fi
-
-			# Mimic Godot dlopen(RTLD_NOW): fail if any symbol is still unresolved.
-			python3 - "${so_path}" <<'"'"'PY'"'"'
-import ctypes
-import os
-import sys
-
-so_path = sys.argv[1]
-rtld_now = getattr(os, "RTLD_NOW", getattr(ctypes, "RTLD_NOW", 0x2))
-ctypes.CDLL(so_path, mode=rtld_now)
-print(f"dlopen(RTLD_NOW) OK: {so_path}")
-PY
-
-			local max_glibc max_glibcxx
-			max_glibc="$(objdump -T "${so_path}" | grep -oE "GLIBC_[0-9.]+" | sort -Vu | tail -1)"
-			max_glibcxx="$(objdump -T "${so_path}" | grep -oE "GLIBCXX_[0-9.]+" | sort -Vu | tail -1)"
-			echo "  libdbus DT_NEEDED: OK"
-			echo "  dlopen(RTLD_NOW): OK"
-			echo "  max GLIBC symbol: ${max_glibc:-unknown}"
-			echo "  max GLIBCXX symbol: ${max_glibcxx:-unknown}"
-		}
-
 		echo "=== Build finished ==="
 		ls -lh "${ADDON_BIN}/${RELEASE_NAME}" "${ADDON_BIN}/${DEBUG_NAME}"
 		ls -lh "${DEMO_BIN}/${RELEASE_NAME}" "${DEMO_BIN}/${DEBUG_NAME}"
@@ -211,8 +171,7 @@ PY
 			echo "${name}: OK (${addon_sum})"
 		done
 
-		verify_extension_so "${ADDON_BIN}/${RELEASE_NAME}" "release addon"
-		verify_extension_so "${ADDON_BIN}/${DEBUG_NAME}" "debug addon"
+		./scripts/verify-linux-binaries.sh "${ADDON_BIN}/${RELEASE_NAME}"
 
 		echo "=== GLIBC symbols (release, addon) ==="
 		objdump -T "${ADDON_BIN}/${RELEASE_NAME}" | grep -oE "GLIBC_[0-9.]+" | sort -Vu

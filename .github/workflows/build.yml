@@ -12,14 +12,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # godot-cpp compiles hundreds of large translation units; unlimited
-  # parallelism exhausts the 7 GB Linux runner and the job is SIGTERM'd.
   CMAKE_BUILD_PARALLEL_LEVEL: 2
-  LINUX_DEBUG_SO: build/bin/libbluetooth_manager.linux.template_debug.x86_64.so
-  WINDOWS_DEBUG_DLL: build/bin/libbluetooth_manager.windows.template_debug.x86_64.dll
 
 jobs:
-  build-linux:
+  linux-unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -44,18 +40,40 @@ jobs:
       - name: Run unit tests
         run: ./build/tests/bluetooth_manager_tests
 
-      - name: Verify extension output
-        run: |
-          ls -lh "${{ env.LINUX_DEBUG_SO }}"
-          ls -lh addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_debug.x86_64.so
-          ls -lh demo/addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_debug.x86_64.so
+  verify-linux-shipping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+      - name: Install verification tools
+        run: sudo apt-get update && sudo apt-get install -y binutils python3 libdbus-1-3
+
+      - name: Verify committed Linux shipping binaries
+        run: |
+          chmod +x scripts/verify-linux-binaries.sh
+          ./scripts/verify-linux-binaries.sh
+
+      - name: Confirm addon and demo Linux binaries match
+        run: |
+          cmp addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_release.x86_64.so \
+             demo/addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_release.x86_64.so
+          cmp addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_debug.x86_64.so \
+             demo/addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_debug.x86_64.so
+
+  linux-docker-build:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
         with:
-          name: bluetooth_manager-linux-debug
-          path: ${{ env.LINUX_DEBUG_SO }}
-          if-no-files-found: error
+          submodules: recursive
+
+      - name: Build Linux binaries (Ubuntu 20.04 Docker)
+        run: |
+          chmod +x scripts/build-linux-docker.sh scripts/verify-linux-binaries.sh
+          ./scripts/build-linux-docker.sh
 
   build-windows:
     runs-on: windows-latest
@@ -79,13 +97,6 @@ jobs:
 
       - name: Verify extension output
         run: |
-          Get-ChildItem "${{ env.WINDOWS_DEBUG_DLL }}"
+          Get-ChildItem build/bin/libbluetooth_manager.windows.template_debug.x86_64.dll
           Get-ChildItem addons/bluetooth_gd/bin/libbluetooth_manager.windows.template_debug.x86_64.dll
           Get-ChildItem demo/addons/bluetooth_gd/bin/libbluetooth_manager.windows.template_debug.x86_64.dll
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bluetooth_manager-windows-debug
-          path: ${{ env.WINDOWS_DEBUG_DLL }}
-          if-no-files-found: error

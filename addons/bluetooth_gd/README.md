@@ -1,19 +1,36 @@
 # BluetoothGD
 
-Cross-platform Bluetooth Classic pairing and connection management for Godot 4.4+.
+Bluetooth Classic pairing and connection management for Godot 4.4+ (GDExtension).
 
 ## Install
 
-1. Enable this addon in **Project → Project Settings → Plugins** (or copy `addons/bluetooth_gd/` into your project).
-2. Add a `BluetoothManager` node to your scene, or autoload `example/bluetooth_manager.tscn`.
+1. Copy `addons/bluetooth_gd/` into your Godot project.
+2. Autoload `example/bluetooth_manager.tscn` as `Bluetooth`, or add a `BluetoothManager` node to a scene.
 3. Connect signals and call methods from GDScript.
 
-## Supported platforms
+This is a **GDExtension addon** — there is no EditorPlugin and nothing to enable under **Project → Plugins**.
+
+## Binaries in `bin/`
+
+| File | Use |
+|------|-----|
+| `*.template_debug.*` | Godot editor (~21 MB Linux debug `.so`) |
+| `*.template_release.*` | Exported games (~1 MB Linux release `.so`) |
+
+Ship both variants. The debug library is large because it includes symbols for editor debugging.
+
+## Platforms
 
 - **Windows 10/11** (x86_64) — supported
-- **Linux** (x86_64) — supported
-- **macOS** — stub (not functional yet)
+- **Linux** (x86_64) — supported (`bluetoothd`, `libdbus-1.so.3`, BlueZ permissions)
+- **macOS** — not included (backend stub only)
 
-## Full documentation
+## Docs and demo
 
-See the [project README](https://github.com/NateClarkTech/BluetoothGD/blob/main/README.md) for API reference, scan options, capabilities, and platform notes.
+- API reference: [repository README](https://github.com/NateClarkTech/BluetoothGD/blob/main/README.md)
+- Example scan UI: `example/scan_demo.tscn`
+- Full demo project: open the `demo/` folder from the repository root
+
+## License
+
+[MIT](LICENSE.md)
