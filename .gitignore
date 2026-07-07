@@ -1,5 +1,7 @@
 # CMake / build output (build, build2, etc.)
 build*/
+docker-build/
+out/
 .vs/
 .vscode/
 *.user

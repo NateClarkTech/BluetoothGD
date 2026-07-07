@@ -25,7 +25,7 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 
 - **Windows HID disconnect:** `disconnect_device()` cannot force-disconnect Bluetooth HID gamepads. Power off the controller or remove the device in Windows Bluetooth settings for a full disconnect.
 - **Linux HID disconnect:** `disconnect_device()` may not keep Bluetooth HID gamepads disconnected if they reconnect when powered on.
-- **Linux missing libdbus:** The extension loads without a hard `libdbus` dependency, but Bluetooth stays unavailable until `libdbus-1` is installed.
+- **Linux missing libdbus:** The extension requires `libdbus-1.so.3` at runtime (linked as `DT_NEEDED`). Godot cannot load the GDExtension if the D-Bus client library is not installed.
 - **macOS:** Backend compiles but returns "not implemented" errors at runtime (see [Supported platforms](#supported-platforms)).
 - **Mobile:** Not implemented yet; see platform table below.
 
@@ -34,7 +34,7 @@ The Windows backend uses **WinRT** (`Windows.Devices.Enumeration`, `DevicePairin
 | Platform | Status | Backend | Notes |
 |----------|--------|---------|-------|
 | **Windows 10/11** (x86_64) | **Supported** | WinRT | Primary development target. Tested with Godot 4.7. |
-| **Linux** (x86_64) | **Supported** | BlueZ / D-Bus | Requires `bluetoothd`, `libdbus-1` at runtime, powered adapter, and BlueZ D-Bus permissions (`bluetooth` group or polkit). Missing `libdbus-1` degrades gracefully (`is_bluetooth_available()` → `false`). |
+| **Linux** (x86_64) | **Supported** | BlueZ / D-Bus | Requires `bluetoothd`, `libdbus-1` at runtime, powered adapter, and BlueZ D-Bus permissions (`bluetooth` group or polkit). |
 | **macOS** (universal) | Stub | IOBluetooth | Milestone 3. Framework linked; operations emit not-implemented errors. |
 | **Android** | Planned | Android Bluetooth API | Milestone 4. Requires runtime permissions (`BLUETOOTH_CONNECT`, `BLUETOOTH_SCAN`, location on older API levels) and export plugin integration. Classic pairing availability varies by device and Android version. |
 | **iOS** | Planned | Core Bluetooth / External Accessory | Milestone 5. iOS restricts third-party Classic Bluetooth access; gamepad pairing may require MFi / system UI flows. BLE-centric workflows are more feasible than full Classic pairing. |
@@ -57,11 +57,11 @@ Use `Bluetooth.get_platform_name()` and `Bluetooth.is_bluetooth_available()` at 
 
 ### Linux build tools
 
-- `libdbus-1-dev` (headers/pkg-config at **build** time only — `libdbus-1` is loaded at runtime via `dlopen`, not linked as `DT_NEEDED`)
+- `libdbus-1-dev` (headers/pkg-config at build time; `libdbus-1` is linked at build time and required at runtime)
 - `pkg-config`, Ninja (recommended), and a C++17 compiler
 - [Docker](https://docs.docker.com/) (optional — recommended for shipping prebuilt `.so` files via `scripts/build-linux-docker.sh`)
 - `bluez` (runtime — `bluetoothd` must be running)
-- `libdbus-1-3` / `dbus-libs` (runtime — if missing, the extension still loads but `is_bluetooth_available()` returns `false`)
+- `libdbus-1-3` / `dbus-libs` (runtime — required; Godot cannot load the extension without it)
 - User in the `bluetooth` group (or equivalent polkit rights) for pair/connect operations
 
 ### macOS build tools (stub backend)
@@ -125,10 +125,10 @@ export DOCKER_VOLUME_OPTS=Z
 |------------|-------|
 | glibc | Symbols up to **GLIBC_2.14** |
 | libstdc++.so.6 | Symbols up to **GLIBCXX_3.4.22** |
-| libdbus-1.so.3 | Loaded at runtime via `dlopen` — not a hard `DT_NEEDED` dependency |
+| libdbus-1.so.3 | Required at runtime (`DT_NEEDED`) |
 | BlueZ | `bluetoothd` running; D-Bus permissions for pair/connect |
 
-If `libdbus-1` is missing, the extension still loads but `is_bluetooth_available()` returns `false` and `error_occurred` reports `not_supported`.
+If `libdbus-1` is missing, Godot fails to load the GDExtension (`undefined symbol` / missing shared library errors).
 
 Verify symbol requirements after any Linux build:
 
@@ -136,7 +136,7 @@ Verify symbol requirements after any Linux build:
 SO=addons/bluetooth_gd/bin/libbluetooth_manager.linux.template_release.x86_64.so
 objdump -T "$SO" | grep -oE 'GLIBC_[0-9.]+'   | sort -Vu | tail -1
 objdump -T "$SO" | grep -oE 'GLIBCXX_[0-9.]+' | sort -Vu | tail -1
-ldd "$SO" | grep dbus   # should print nothing
+ldd "$SO" | grep dbus   # should list libdbus-1.so.3
 ```
 
 Build on an older base image yourself if you need to target an even older distro.

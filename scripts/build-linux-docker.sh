@@ -100,20 +100,20 @@ docker run --rm \
 
 		echo "=== CMake $(cmake --version | head -1) ==="
 
-		# Avoid stale CMake cache mixing debug/release godot-cpp bindings.
-		rm -rf build/release build/debug
+		# Use docker-build/ (not build/) so a prior root-owned Docker run cannot block writes.
+		rm -rf docker-build/release docker-build/debug
 
 		echo "=== Release build ==="
-		cmake -S . -B build/release -G Ninja \
+		cmake -S . -B docker-build/release -G Ninja \
 			-DCMAKE_BUILD_TYPE=Release \
 			-DGODOTCPP_TARGET=template_release
-		cmake --build build/release -j"$(nproc)"
+		cmake --build docker-build/release -j"$(nproc)"
 
 		echo "=== Debug build ==="
-		cmake -S . -B build/debug -G Ninja \
+		cmake -S . -B docker-build/debug -G Ninja \
 			-DCMAKE_BUILD_TYPE=Debug \
 			-DGODOTCPP_TARGET=template_debug
-		cmake --build build/debug -j"$(nproc)"
+		cmake --build docker-build/debug -j"$(nproc)"
 
 		RELEASE_NAME="libbluetooth_manager.linux.template_release.x86_64.so"
 		DEBUG_NAME="libbluetooth_manager.linux.template_debug.x86_64.so"
@@ -132,8 +132,8 @@ docker run --rm \
 			cp -f "${src}" "${DEMO_BIN}/${name}"
 			chmod +x "${ADDON_BIN}/${name}" "${DEMO_BIN}/${name}"
 		}
-		copy_to_both "build/release/bin/${RELEASE_NAME}" "${RELEASE_NAME}"
-		copy_to_both "build/debug/bin/${DEBUG_NAME}" "${DEBUG_NAME}"
+		copy_to_both "docker-build/release/bin/${RELEASE_NAME}" "${RELEASE_NAME}"
+		copy_to_both "docker-build/debug/bin/${DEBUG_NAME}" "${DEBUG_NAME}"
 
 		echo "=== Build finished ==="
 		ls -lh "${ADDON_BIN}/${RELEASE_NAME}" "${ADDON_BIN}/${DEBUG_NAME}"

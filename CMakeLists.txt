@@ -168,12 +168,9 @@ elseif(APPLE)
 
 elseif(UNIX)
     target_include_directories(${TARGET_NAME} PRIVATE ${DBUS_INCLUDE_DIRS})
-    # libdbus is loaded at runtime via dlopen (see dbus_loader.cpp). D-Bus symbols stay
-    # undefined at link time so libdbus is not a DT_NEEDED dependency of the extension.
-    target_link_libraries(${TARGET_NAME} PRIVATE dl Threads::Threads)
-    target_link_options(${TARGET_NAME} PRIVATE
-        "-Wl,--unresolved-symbols=ignore-all"
-    )
+    # Link libdbus so Godot can dlopen the extension (RTLD_NOW resolves symbols at load).
+    # dbus_loader.cpp still dlopens libdbus with RTLD_GLOBAL for BlueZ runtime use.
+    target_link_libraries(${TARGET_NAME} PRIVATE dl Threads::Threads ${DBUS_LIBRARIES})
 endif()
 
 add_executable(bluetooth_manager_tests tests/test_device_info.cpp)
